@@ -1,11 +1,9 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
-import CardContent from "@mui/material/CardContent";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -21,9 +19,16 @@ import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import { format, parseISO } from "date-fns";
 import { useNotify } from "@/components/common/Notify";
-import { PageHeader } from "@/components/common/PageHeader";
 import { ReasonDialog } from "@/components/common/ReasonDialog";
+import { InfoBox, SectionLabel } from "@/components/common/InfoBox";
+import { DetailTabPanel, DetailViewHeroSidebar, DetailViewLayout, DetailViewMetricStrip, DetailViewTabs, MasterStatusBadge } from "@/components/shared/DetailView";
+import InfoIcon from "@mui/icons-material/InfoOutlined";
+import ReceiptIcon from "@mui/icons-material/ReceiptLongOutlined";
+import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfOutlined";
+import DownloadIcon from "@mui/icons-material/DownloadOutlined";
 import { ErrorState } from "@/components/common/states";
+import { HeroActions } from "@/components/common/HeroActions";
 import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
@@ -33,15 +38,6 @@ import type { AllocationRow, PaymentRow } from "../service";
 import { AllocationGrid, sumAllocations } from "./AllocationGrid";
 
 type Detail = PaymentRow & { allocations: AllocationRow[] };
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" component="div">{children || "—"}</Typography>
-    </Box>
-  );
-}
 
 function AllocateDialog({ payment, onClose, onDone }: { payment: Detail; onClose: () => void; onDone: () => void }) {
   const notify = useNotify();
@@ -79,6 +75,8 @@ function AllocateDialog({ payment, onClose, onDone }: { payment: Detail; onClose
 }
 
 export function PaymentDetail({ id }: { id: string }) {
+  const router = useRouter();
+  const [tab, setTab] = useState(0);
   const notify = useNotify();
   const { data: p, error, loading, reload } = useFetch<Detail>(`/api/payments/${id}`);
   const [dialog, setDialog] = useState<"allocate" | "void" | { reverse: AllocationRow } | null>(null);
@@ -89,40 +87,71 @@ export function PaymentDetail({ id }: { id: string }) {
   const voided = p.voided_at !== null;
   const hasLive = p.allocations.some((a) => !a.reversed_at);
   const receipt = `/api/payments/${id}/receipt`;
+  const tabs = [
+    { key: "overview", label: "Overview", icon: <InfoIcon sx={{ fontSize: 18 }} /> },
+    { key: "allocations", label: "Allocations", icon: <ReceiptIcon sx={{ fontSize: 18 }} />, count: p.allocations.length || undefined },
+  ];
 
   return (
     <>
-      <PageHeader
-        title={<>{p.receipt_number} {voided && <Typography component="span" color="error" variant="subtitle1">Voided</Typography>}</>}
-        crumbs={[{ label: "Dashboard", href: "/" }, { label: "Payments", href: "/payments" }, { label: p.receipt_number }]}
-        actions={
-          <>
-            <Button variant="outlined" href={receipt} target="_blank" rel="noopener">View receipt</Button>
-            <Button variant="outlined" href={`${receipt}?download=1`}>Download receipt</Button>
-            {!voided && Number(p.unallocated) > 0 && <Button variant="contained" onClick={() => setDialog("allocate")}>Allocate to invoices</Button>}
-            {!voided && <Button color="error" variant="outlined" onClick={() => setDialog("void")}>Void payment</Button>}
-          </>
+      <DetailViewLayout
+        onBack={() => router.push("/payments")}
+        backLabel="Back to Payments"
+        sidebar={
+          <DetailViewHeroSidebar
+            onBack={() => router.push("/payments")}
+            backLabel="Back to Payments"
+            title={p.receipt_number}
+            titleLabel="Receipt number"
+            subtitle={p.client_name}
+            subtitleLabel="Client"
+            copyValue={p.receipt_number}
+            avatarIcon={<PaymentsIcon sx={{ fontSize: 32 }} />}
+            badges={<MasterStatusBadge status={voided ? "inactive" : Number(p.unallocated) > 0 ? "pending" : "completed"} customLabel={voided ? "Voided" : Number(p.unallocated) > 0 ? "Advance available" : "Fully allocated"} />}
+            attributes={[
+              { label: "Client", value: <Link href={`/clients/${p.client_id}`}>{p.client_name}</Link> },
+              ...(p.sale_id ? [{ label: "For sale", value: <Link href={`/sales/${p.sale_id}`}>{p.sale_number}</Link> }] : []),
+              { label: "Date", value: format(parseISO(p.payment_date), "dd MMM yyyy") },
+              { label: "Method", value: <OptionLabel table="payments" column="method" value={p.method} /> },
+              { label: "Reference", value: p.reference ?? "—" },
+              { label: "Recorded by", value: `${p.recorded_by_name ?? "—"} · ${format(new Date(p.created_at), "dd MMM yyyy")}` },
+            ]}
+            actions={
+              <HeroActions>
+                {!voided && Number(p.unallocated) > 0 && <Button fullWidth variant="contained" onClick={() => setDialog("allocate")}>Allocate to invoices</Button>}
+                <Button fullWidth variant="outlined" startIcon={<PictureAsPdfIcon />} href={receipt} target="_blank" rel="noopener">View receipt</Button>
+                <Button fullWidth variant="outlined" startIcon={<DownloadIcon />} href={`${receipt}?download=1`}>Download receipt</Button>
+                {!voided && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("void")}>Void payment</Button>}
+              </HeroActions>
+            }
+          />
         }
-      />
-      {voided && <Alert severity="error" sx={{ mb: 2 }}>Voided: {p.void_reason}. This payment no longer counts as collected.</Alert>}
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, md: 4 }}><Field label="Client"><Link href={`/clients/${p.client_id}`}>{p.client_name}</Link>{p.sale_id && <Box sx={{ color: "text.secondary" }}>For sale <Link href={`/sales/${p.sale_id}`}>{p.sale_number}</Link></Box>}</Field></Grid>
-            <Grid size={{ xs: 6, md: 2 }}><Field label="Date">{format(parseISO(p.payment_date), "dd MMM yyyy")}</Field></Grid>
-            <Grid size={{ xs: 6, md: 3 }}><Field label="Method"><OptionLabel table="payments" column="method" value={p.method} /></Field></Grid>
-            <Grid size={{ xs: 12, md: 3 }}><Field label="Reference">{p.reference}</Field></Grid>
-            <Grid size={{ xs: 6, md: 4 }}><Field label="Amount received"><strong>{formatMoney(p.amount)}</strong></Field></Grid>
-            <Grid size={{ xs: 6, md: 4 }}><Field label="Allocated to invoices">{formatMoney(p.allocated)}</Field></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><Field label="Not allocated (advance)">{voided ? "—" : formatMoney(p.unallocated)}</Field></Grid>
-            <Grid size={{ xs: 12, md: 8 }}><Field label="Notes">{p.notes}</Field></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><Field label="Recorded by">{p.recorded_by_name} · {format(new Date(p.created_at), "dd MMM yyyy, hh:mm a")}</Field></Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Allocations</Typography>
+        metricStrip={
+          <DetailViewMetricStrip
+            columns={3}
+            metrics={[
+              { label: "Amount received", value: formatMoney(p.amount), subtitle: format(parseISO(p.payment_date), "dd MMM yyyy") },
+              { label: "Allocated to invoices", value: formatMoney(p.allocated), subtitle: `${p.allocations.filter((a) => !a.reversed_at).length} active allocation(s)`, color: "#10b981" },
+              { label: "Not allocated (advance)", value: voided ? "—" : formatMoney(p.unallocated), subtitle: "available to apply", color: !voided && Number(p.unallocated) > 0 ? "#f59e0b" : undefined },
+            ]}
+          />
+        }
+      >
+        {voided && <Alert severity="error" sx={{ mb: 2 }}>Voided: {p.void_reason}. This payment no longer counts as collected.</Alert>}
+        <DetailViewTabs tabs={tabs} activeTab={tab} onChange={setTab}>
+          <DetailTabPanel value={tab} index={0}>
+            <SectionLabel>Payment</SectionLabel>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Client"><Link href={`/clients/${p.client_id}`}>{p.client_name}</Link></InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><InfoBox label="For sale">{p.sale_id ? <Link href={`/sales/${p.sale_id}`}>{p.sale_number}</Link> : null}</InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Date">{format(parseISO(p.payment_date), "dd MMM yyyy")}</InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Method"><OptionLabel table="payments" column="method" value={p.method} /></InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Reference">{p.reference}</InfoBox></Grid>
+              <Grid size={12}><InfoBox label="Notes">{p.notes}</InfoBox></Grid>
+              <Grid size={12}><InfoBox label="Recorded by">{p.recorded_by_name} · {format(new Date(p.created_at), "dd MMM yyyy, hh:mm a")}</InfoBox></Grid>
+            </Grid>
+          </DetailTabPanel>
+          <DetailTabPanel value={tab} index={1}>
           {p.allocations.length === 0 ? <Typography color="text.secondary">Not allocated to any invoice yet.</Typography> : (
             <TableContainer>
               <Table size="small">
@@ -141,9 +170,10 @@ export function PaymentDetail({ id }: { id: string }) {
               </Table>
             </TableContainer>
           )}
-          {!voided && hasLive && <Typography variant="caption" color="text.secondary">To correct a wrong allocation, reverse it and allocate again. To void this payment, first reverse all of its allocations.</Typography>}
-        </CardContent>
-      </Card>
+            {!voided && hasLive && <Typography variant="caption" color="text.secondary">To correct a wrong allocation, reverse it and allocate again. To void this payment, first reverse all of its allocations.</Typography>}
+          </DetailTabPanel>
+        </DetailViewTabs>
+      </DetailViewLayout>
 
       {dialog === "allocate" && <AllocateDialog payment={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reload(); }} />}
       {dialog === "void" && (

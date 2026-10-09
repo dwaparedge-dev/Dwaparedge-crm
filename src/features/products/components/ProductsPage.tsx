@@ -4,7 +4,6 @@ import { Controller, useForm } from "react-hook-form";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import Dialog from "@mui/material/Dialog";
@@ -15,21 +14,21 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
-import MenuItem from "@mui/material/MenuItem";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/EditOutlined";
-import SearchIcon from "@mui/icons-material/Search";
 import { useNotify } from "@/components/common/Notify";
 import { PageHeader } from "@/components/common/PageHeader";
-import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
+import { ErrorState } from "@/components/common/states";
+import { DataTable } from "@/components/common/DataTable";
+import { StatCards } from "@/components/common/StatCards";
+import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
+import CheckCircleIcon from "@mui/icons-material/CheckCircleOutlined";
+import PauseCircleIcon from "@mui/icons-material/PauseCircleOutlined";
+import CategoryIcon from "@mui/icons-material/CategoryOutlined";
+import { ListLayout } from "@/components/common/ListLayout";
+import { SegmentedTabs } from "@/components/common/SegmentedTabs";
+import type { GridColDef } from "@mui/x-data-grid";
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
@@ -137,66 +136,58 @@ export function ProductsPage() {
   if (debounced) qs.set("search", debounced);
   if (type) qs.set("type", type);
   if (active) qs.set("active", active);
-  const { data, error, loading, reload } = useFetch<{ items: ProductRow[]; total: number }>(`/api/products?${qs}`);
+  const { data, error, loading, reload } = useFetch<{ items: ProductRow[]; total: number; summary: { total: number; active: number; inactive: number; types: number } }>(`/api/products?${qs}`);
 
   const show = (p: ProductRow | null) => { setEditing(p); setDialogKey((k) => k + 1); setOpen(true); };
+
+  const columns: GridColDef<ProductRow>[] = [
+    {
+      field: "name", headerName: "Name", minWidth: 220,
+      renderCell: ({ row: p }) => (
+        <Box>
+          <Box sx={{ fontWeight: 600 }}>{p.name}</Box>
+          {p.sku && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{p.sku}</Box>}
+        </Box>
+      ),
+    },
+    { field: "type", headerName: "Type", width: 190, renderCell: ({ row: p }) => <OptionLabel table="products" column="type" value={p.type} /> },
+    { field: "hsn_sac", headerName: "HSN/SAC", width: 120, valueFormatter: (v: string | null) => v ?? "—" },
+    { field: "default_price", headerName: "Default price", width: 140, align: "right", headerAlign: "right", valueFormatter: (v: string) => formatMoney(v) },
+    { field: "gst_rate", headerName: "GST", width: 90, align: "right", headerAlign: "right", valueFormatter: (v: string) => (Number(v) === 0 ? "Exempt" : `${Number(v)}%`) },
+    { field: "is_active", headerName: "Status", width: 110, renderCell: ({ row: p }) => <Chip size="small" variant="outlined" label={p.is_active ? "Active" : "Inactive"} color={p.is_active ? "success" : "default"} /> },
+    { field: "actions", headerName: "Edit", width: 80, align: "right", headerAlign: "right", renderCell: ({ row: p }) => <IconButton aria-label={`Edit ${p.name}`} onClick={(e) => { e.stopPropagation(); show(p); }}><EditIcon fontSize="small" /></IconButton> },
+  ];
+  const filtered = Boolean(debounced || type || active);
 
   return (
     <>
       <PageHeader
-        title="Products & Services"
+        title="Products & Services" subtitle="The catalogue you sell, with default prices and GST"
         crumbs={[{ label: "Dashboard", href: "/" }, { label: "Products & Services" }]}
         actions={<Button variant="contained" startIcon={<AddIcon />} onClick={() => show(null)}>Add product</Button>}
       />
-      <Card>
-        <Box sx={{ p: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-          <TextField size="small" placeholder="Search name, SKU, description" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ flex: "1 1 260px", maxWidth: 420 }}
-            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }, htmlInput: { "aria-label": "Search products" } }} />
-          <OptionFilter table="products" column="type" label="Type" value={type} onChange={(v) => { setType(v); setPage(0); }} minWidth={200} />
-          <TextField select size="small" label="Status" value={active} onChange={(e) => { setActive(e.target.value); setPage(0); }} sx={{ minWidth: 140 }}>
-            <MenuItem value="">All</MenuItem>
-            <MenuItem value="true">Active</MenuItem>
-            <MenuItem value="false">Inactive</MenuItem>
-          </TextField>
-        </Box>
-        {error ? <Box sx={{ p: 2 }}><ErrorState message={error} onRetry={reload} /></Box>
-          : loading && !data ? <TableSkeleton />
-          : data && data.items.length === 0 ? (
-            <EmptyState title={debounced || type || active ? "No products match your filters" : "No products yet"} hint="Add the software, subscriptions and services you sell."
-              action={!debounced && !type && !active ? <Button variant="contained" onClick={() => show(null)}>Add product</Button> : undefined} />
-          ) : (
-            <>
-              <TableContainer sx={{ opacity: loading ? 0.6 : 1 }}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Name</TableCell><TableCell>Type</TableCell><TableCell>HSN/SAC</TableCell>
-                      <TableCell align="right">Default price</TableCell><TableCell align="right">GST</TableCell><TableCell>Status</TableCell><TableCell align="right">Edit</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data?.items.map((p) => (
-                      <TableRow key={p.id} hover>
-                        <TableCell>
-                          <Box sx={{ fontWeight: 600 }}>{p.name}</Box>
-                          {p.sku && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{p.sku}</Box>}
-                        </TableCell>
-                        <TableCell><OptionLabel table="products" column="type" value={p.type} /></TableCell>
-                        <TableCell>{p.hsn_sac ?? "—"}</TableCell>
-                        <TableCell align="right">{formatMoney(p.default_price)}</TableCell>
-                        <TableCell align="right">{Number(p.gst_rate) === 0 ? "Exempt" : `${Number(p.gst_rate)}%`}</TableCell>
-                        <TableCell><Chip size="small" variant="outlined" label={p.is_active ? "Active" : "Inactive"} color={p.is_active ? "success" : "default"} /></TableCell>
-                        <TableCell align="right"><IconButton aria-label={`Edit ${p.name}`} onClick={() => show(p)}><EditIcon fontSize="small" /></IconButton></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <TablePagination component="div" count={data?.total ?? 0} page={page} rowsPerPage={pageSize} rowsPerPageOptions={[10, 20, 50, 100]}
-                onPageChange={(_, p) => setPage(p)} onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }} />
-            </>
-          )}
-      </Card>
+      <StatCards loading={!data} stats={[
+        { label: "Products & services", value: data?.summary.total ?? 0, hint: "in the catalogue", icon: <Inventory2Icon />, onClick: () => { setActive(""); setPage(0); } },
+        { label: "Active", value: data?.summary.active ?? 0, hint: "available for new sales", icon: <CheckCircleIcon />, selected: active === "true", onClick: () => { setActive("true"); setPage(0); } },
+        { label: "Inactive", value: data?.summary.inactive ?? 0, hint: "hidden from new sales", icon: <PauseCircleIcon />, selected: active === "false", onClick: () => { setActive("false"); setPage(0); } },
+        { label: "Types in use", value: data?.summary.types ?? 0, hint: "product types", icon: <CategoryIcon /> },
+      ]} />
+      <ListLayout
+        onRefresh={reload} refreshing={loading}
+        search={{ value: search, onChange: setSearch, placeholder: "Search name, SKU, description", label: "Search products" }}
+        filters={<OptionFilter table="products" column="type" label="Type" value={type} onChange={(v) => { setType(v); setPage(0); }} minWidth={200} />}
+        tabs={<SegmentedTabs label="Product status" value={active} onChange={(v) => { setActive(v); setPage(0); }} tabs={[{ value: "", label: "All" }, { value: "true", label: "Active" }, { value: "false", label: "Inactive" }]} />}
+      >
+        {error ? <Box sx={{ p: 2 }}><ErrorState message={error} onRetry={reload} /></Box> : (
+          <DataTable<ProductRow>
+            label="Products" rows={data?.items ?? []} columns={columns} total={data?.total ?? 0} loading={loading}
+            page={page} pageSize={pageSize} onPageChange={(p, size) => { setPage(p); setPageSize(size); }}
+            onRowClick={(p) => show(p)}
+            emptyTitle={filtered ? "No products match your filters" : "No products yet"} emptyHint="Add the software, subscriptions and services you sell."
+            emptyAction={!filtered ? <Button variant="contained" onClick={() => show(null)}>Add product</Button> : undefined}
+          />
+        )}
+      </ListLayout>
       <ProductDialog key={dialogKey} product={editing} open={open} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); reload(); }} />
     </>
   );

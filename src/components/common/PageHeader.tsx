@@ -1,38 +1,28 @@
-import Link from "next/link";
+"use client";
 import Box from "@mui/material/Box";
-import Breadcrumbs from "@mui/material/Breadcrumbs";
-import Typography from "@mui/material/Typography";
-import MuiLink from "@mui/material/Link";
+import WavyGradientHeader from "@/components/shared/WavyGradientHeader";
+import type { Crumb } from "./crumb";
 
-export interface Crumb {
-  label: string;
-  href?: string;
-}
+export type { Crumb };
 
-export function PageHeader({ title, crumbs, actions }: { title: React.ReactNode; crumbs?: Crumb[]; actions?: React.ReactNode }) {
+/** The page banner (FactoONE's WavyGradientHeader) with the page's actions on the right. */
+export function PageHeader({ title, subtitle, actions }: { title: React.ReactNode; subtitle?: React.ReactNode; crumbs?: Crumb[]; actions?: React.ReactNode }) {
   return (
-    <Box sx={{ mb: 3 }}>
-      {crumbs && (
-        <Breadcrumbs aria-label="Breadcrumb" sx={{ mb: 0.5 }}>
-          {crumbs.map((c) =>
-            c.href ? (
-              <MuiLink key={c.label} component={Link} href={c.href} underline="hover" color="inherit" variant="body2">
-                {c.label}
-              </MuiLink>
-            ) : (
-              <Typography key={c.label} variant="body2" color="text.primary">
-                {c.label}
-              </Typography>
-            ),
-          )}
-        </Breadcrumbs>
+    <Box sx={{ mt: { xs: 1, md: 2 } }}>
+    <WavyGradientHeader compact title={title} subtitle={typeof subtitle === "string" ? subtitle : undefined}>
+      {actions && (
+        <Box
+          sx={{
+            display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center",
+            "& .MuiButton-root": { borderRadius: 10, px: 2.5 },
+            "& .MuiButton-contained": { bgcolor: "#fff", color: "primary.dark", "&:hover": { bgcolor: "rgb(255 255 255 / 0.88)" } },
+            "& .MuiButton-outlined, & .MuiButton-text": { color: "#fff", bgcolor: "rgb(255 255 255 / 0.14)", borderColor: "rgb(255 255 255 / 0.4)", "&:hover": { bgcolor: "rgb(255 255 255 / 0.24)", borderColor: "rgb(255 255 255 / 0.6)" } },
+          }}
+        >
+          {actions}
+        </Box>
       )}
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
-        <Typography variant="h5" component="h1">
-          {title}
-        </Typography>
-        {actions && <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>{actions}</Box>}
-      </Box>
+    </WavyGradientHeader>
     </Box>
   );
 }

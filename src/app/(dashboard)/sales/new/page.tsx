@@ -1,6 +1,6 @@
-import { SaleFormPage } from "@/features/sales/components/SaleFormPage";
+import { SalesList } from "@/features/sales/components/SalesList";
 
 export default async function Page({ searchParams }: PageProps<"/sales/new">) {
   const { clientId } = await searchParams;
-  return <SaleFormPage clientId={typeof clientId === "string" ? clientId : undefined} />;
+  return <SalesList openNew newClientId={typeof clientId === "string" ? clientId : undefined} />;
 }

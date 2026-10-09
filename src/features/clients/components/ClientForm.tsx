@@ -1,15 +1,13 @@
 "use client";
 import { useState } from "react";
 import { useForm, Controller } from "react-hook-form";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Grid from "@mui/material/Grid";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import { FormShell } from "@/components/common/FormShell";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
@@ -39,6 +37,7 @@ export const EMPTY_CLIENT: ClientFormValues = {
 };
 
 interface Props {
+  open: boolean;
   initial?: ClientFormValues;
   /** Existing client id when editing. */
   clientId?: string;
@@ -46,7 +45,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export function ClientForm({ initial = EMPTY_CLIENT, clientId, onSaved, onCancel }: Props) {
+export function ClientForm({ open, initial = EMPTY_CLIENT, clientId, onSaved, onCancel }: Props) {
   const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = useForm<ClientFormValues>({ defaultValues: initial });
   const owners = useFetch<{ items: { id: string; name: string }[] }>("/api/users/options");
   const [formError, setFormError] = useState<string | null>(null);
@@ -87,8 +86,8 @@ export function ClientForm({ initial = EMPTY_CLIENT, clientId, onSaved, onCancel
   const f = (name: keyof ClientFormValues) => ({ error: Boolean(errors[name]), helperText: errors[name]?.message as string | undefined });
 
   return (
-    <Box component="form" noValidate onSubmit={handleSubmit((v) => save(v))}>
-      {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
+    <FormShell open={open} title={clientId ? "Edit client" : "Add client"} onClose={onCancel} onSubmit={handleSubmit((v) => save(v))}
+      submitting={isSubmitting} submitLabel={clientId ? "Save changes" : "Create client"} error={formError}>
 
       <Card sx={{ mb: 2 }}>
         <CardContent>
@@ -169,7 +168,7 @@ export function ClientForm({ initial = EMPTY_CLIENT, clientId, onSaved, onCancel
         </CardContent>
       </Card>
 
-      <Card sx={{ mb: 3 }}>
+      <Card>
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>Account</Typography>
           <Grid container spacing={2}>
@@ -196,13 +195,6 @@ export function ClientForm({ initial = EMPTY_CLIENT, clientId, onSaved, onCancel
         </CardContent>
       </Card>
 
-      <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
-        <Button onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
-        <Button type="submit" variant="contained" disabled={isSubmitting}>
-          {isSubmitting ? "Saving…" : clientId ? "Save changes" : "Create client"}
-        </Button>
-      </Box>
-
       <ConfirmDialog
         open={pending !== null}
         title="Possible duplicate"
@@ -219,6 +211,6 @@ export function ClientForm({ initial = EMPTY_CLIENT, clientId, onSaved, onCancel
           void save(v, true);
         }}
       />
-    </Box>
+    </FormShell>
   );
 }

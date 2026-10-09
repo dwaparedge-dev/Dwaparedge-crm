@@ -1,6 +1,6 @@
-import { ClientFormPage } from "@/features/clients/components/ClientFormPage";
+import { redirect } from "next/navigation";
 
 export default async function EditClientPage({ params }: PageProps<"/clients/[id]/edit">) {
   const { id } = await params;
-  return <ClientFormPage clientId={id} />;
+  redirect(`/clients/${id}`);
 }

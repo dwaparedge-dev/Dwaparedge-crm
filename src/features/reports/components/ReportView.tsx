@@ -17,13 +17,15 @@ import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import TableSortLabel from "@mui/material/TableSortLabel";
 import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import DownloadIcon from "@mui/icons-material/FileDownloadOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import { addDays, format, parseISO } from "date-fns";
 import { ClientPicker } from "@/components/common/ClientPicker";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
+import { StatCards } from "@/components/common/StatCards";
+import CurrencyRupeeIcon from "@mui/icons-material/CurrencyRupee";
+import NumbersIcon from "@mui/icons-material/Numbers";
 import { useFetch } from "@/components/common/useFetch";
 import { RANGE_PRESETS, presetRange, todayIST, type RangePreset } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
@@ -196,13 +198,8 @@ function ReportBody({ meta }: { meta: ReportMeta }) {
         ) : (
           <>
             {data.summary.length > 0 && (
-              <Box sx={{ display: "flex", gap: 4, flexWrap: "wrap", px: 2, py: 1.5 }}>
-                {data.summary.map((s) => (
-                  <Box key={s.label}>
-                    <Typography variant="caption" color="text.secondary">{s.label}</Typography>
-                    <Typography sx={{ fontWeight: 700 }}>{s.type === "money" ? formatMoney(s.value) : s.value}</Typography>
-                  </Box>
-                ))}
+              <Box sx={{ px: 2, pt: 2 }}>
+                <StatCards stats={data.summary.map((x) => ({ label: x.label, value: x.type === "money" ? formatMoney(x.value) : x.value, icon: x.type === "money" ? <CurrencyRupeeIcon /> : <NumbersIcon /> }))} />
               </Box>
             )}
             {data.rows.length === 0 ? <EmptyState title="No results" hint="Nothing matches these filters." /> : (

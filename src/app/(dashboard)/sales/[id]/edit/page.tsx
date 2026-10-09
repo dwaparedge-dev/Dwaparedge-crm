@@ -1,6 +1,6 @@
-import { SaleFormPage } from "@/features/sales/components/SaleFormPage";
+import { redirect } from "next/navigation";
 
 export default async function Page({ params }: PageProps<"/sales/[id]/edit">) {
   const { id } = await params;
-  return <SaleFormPage saleId={id} />;
+  redirect(`/sales/${id}`);
 }

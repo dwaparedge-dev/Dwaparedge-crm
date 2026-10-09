@@ -114,6 +114,24 @@ export async function listSales(p: z.infer<typeof listSalesSchema>) {
      ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY s.created_at DESC, s.id LIMIT ${limit} OFFSET ${offset}`,
     values,
   );
+  // Summary over everything the filters match (ignoring paging); status counts ignore the status filter so the tabs can show them.
+  const filterValues = values.slice(0, values.length - 2);
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+  const sum = await db.queryOne<{ order_value: string | null; billed: string | null; paid: string | null; balance: string | null }>(
+    `SELECT sum(s.total) AS order_value, sum(sb.billed_total) AS billed, sum(sb.paid_on_invoices + sb.advance) AS paid,
+            sum(CASE WHEN s.status = 'cancelled' THEN 0 ELSE GREATEST(sb.billed_total + sb.unbilled_estimate - sb.paid_on_invoices - sb.advance, 0.00) END) AS balance
+     FROM sales s JOIN clients c ON c.id = s.client_id JOIN sale_billing sb ON sb.sale_id = s.id ${whereSql}`,
+    filterValues,
+  );
+  const statusIdx = p.status ? where.findIndex((w) => w.startsWith("s.status =")) : -1;
+  const countWhere = where.filter((_, i) => i !== statusIdx);
+  const countValues = filterValues.filter((_, i) => i !== statusIdx);
+  // Re-number placeholders after removing the status parameter.
+  const renumbered = statusIdx < 0 ? countWhere : countWhere.map((w) => w.replace(/\$(\d+)/g, (_m, n) => `$${Number(n) > statusIdx + 1 ? Number(n) - 1 : Number(n)}`));
+  const counts = await db.query<{ status: string; n: string }>(
+    `SELECT s.status, count(*) AS n FROM sales s JOIN clients c ON c.id = s.client_id ${renumbered.length ? "WHERE " + renumbered.join(" AND ") : ""} GROUP BY s.status`,
+    countValues,
+  );
   return {
     items: rows.map((r) => {
       const { total_rows, ...rest } = r;
@@ -121,6 +139,10 @@ export async function listSales(p: z.infer<typeof listSalesSchema>) {
       return rest;
     }),
     total: Number(rows[0]?.total_rows ?? 0),
+    summary: {
+      orderValue: sum?.order_value ?? "0.00", billed: sum?.billed ?? "0.00", paid: sum?.paid ?? "0.00", balance: sum?.balance ?? "0.00",
+      statusCounts: Object.fromEntries(counts.map((c) => [c.status, Number(c.n)])) as Record<string, number>,
+    },
     page: p.page,
     pageSize: p.pageSize,
   };

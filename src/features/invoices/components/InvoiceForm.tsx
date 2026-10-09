@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -11,6 +10,7 @@ import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
+import { FormShell } from "@/components/common/FormShell";
 import { ApiError, api } from "@/lib/api-client";
 import { INDIAN_STATES } from "@/lib/india";
 import type { LineItem } from "@/components/forms/LineItemsEditor";
@@ -28,6 +28,7 @@ export interface InvoiceFormValues {
 }
 
 interface Props {
+  open: boolean;
   initial: InvoiceFormValues;
   invoiceId: string;
   saleNumber: string;
@@ -38,7 +39,7 @@ interface Props {
 }
 
 /** Edits a draft. Drafts are created from a sale (“Create invoice”), so this never starts from nothing. */
-export function InvoiceForm({ initial, invoiceId, saleNumber, saleItems, ownTaxable, onSaved, onCancel }: Props) {
+export function InvoiceForm({ open, initial, invoiceId, saleNumber, saleItems, ownTaxable, onSaved, onCancel }: Props) {
   const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = useForm<InvoiceFormValues>({ defaultValues: initial });
   const { append, remove } = useFieldArray({ control, name: "items" });
   const [formError, setFormError] = useState<{ message: string; settings?: boolean } | null>(null);
@@ -60,7 +61,7 @@ export function InvoiceForm({ initial, invoiceId, saleNumber, saleItems, ownTaxa
   }
 
   return (
-    <Box component="form" noValidate onSubmit={handleSubmit(submit)}>
+    <FormShell open={open} title="Edit draft invoice" maxWidth="lg" onClose={onCancel} onSubmit={handleSubmit(submit)} submitting={isSubmitting} submitLabel="Save draft">
       {formError && (
         <Alert severity="error" sx={{ mb: 2 }} action={formError.settings ? <Button color="inherit" size="small" component={Link} href="/settings">Open Settings</Button> : undefined}>
           {formError.message}
@@ -94,7 +95,7 @@ export function InvoiceForm({ initial, invoiceId, saleNumber, saleItems, ownTaxa
           <InvoiceLinesEditor control={control} register={register} errors={errors} saleItems={saleItems} ownTaxable={ownTaxable} append={append} remove={remove} />
         </CardContent>
       </Card>
-      <Card sx={{ mb: 3 }}>
+      <Card>
         <CardContent>
           <Grid container spacing={2}>
             <Grid size={12}><TextField label="Payment terms" multiline minRows={2} fullWidth {...register("paymentTerms")} /></Grid>
@@ -102,10 +103,6 @@ export function InvoiceForm({ initial, invoiceId, saleNumber, saleItems, ownTaxa
           </Grid>
         </CardContent>
       </Card>
-      <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
-        <Button onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
-        <Button type="submit" variant="contained" disabled={isSubmitting}>{isSubmitting ? "Saving…" : "Save draft"}</Button>
-      </Box>
-    </Box>
+    </FormShell>
   );
 }

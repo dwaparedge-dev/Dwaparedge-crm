@@ -94,9 +94,22 @@ export async function listLicenses(p: z.infer<typeof listLicensesSchema>) {
     }),
     total: Number(rows[0]?.total_rows ?? 0),
     renewalValue: sum?.value ?? "0.00",
+    summary: await licenseSummary(p.clientId),
     page: p.page,
     pageSize: p.pageSize,
   };
+}
+
+async function licenseSummary(clientId?: string) {
+  const r = await db.queryOne<{ active: string; expiring: string; expired: string; pending: string }>(
+    `SELECT count(*) FILTER (WHERE ${EFFECTIVE_STATUS_SQL} = 'active') AS active,
+            count(*) FILTER (WHERE l.status = 'active' AND l.expiry_date BETWEEN ${TODAY_SQL} AND ${TODAY_SQL} + 30) AS expiring,
+            count(*) FILTER (WHERE ${EFFECTIVE_STATUS_SQL} = 'expired') AS expired,
+            count(*) FILTER (WHERE l.status = 'pending') AS pending
+     FROM licenses l ${clientId ? "WHERE l.client_id = $1" : ""}`,
+    clientId ? [clientId] : [],
+  );
+  return { active: Number(r?.active ?? 0), expiring: Number(r?.expiring ?? 0), expired: Number(r?.expired ?? 0), pending: Number(r?.pending ?? 0) };
 }
 
 export async function getLicense(id: string) {

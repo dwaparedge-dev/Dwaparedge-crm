@@ -2,25 +2,21 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
-import InputAdornment from "@mui/material/InputAdornment";
-import MenuItem from "@mui/material/MenuItem";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
-import SearchIcon from "@mui/icons-material/Search";
 import { format } from "date-fns";
 import { PageHeader } from "@/components/common/PageHeader";
-import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
+import { ErrorState } from "@/components/common/states";
+import { DataTable } from "@/components/common/DataTable";
+import { NewInvoiceDialog } from "./NewInvoiceDialog";
+import { ListLayout } from "@/components/common/ListLayout";
+import { SegmentedTabs } from "@/components/common/SegmentedTabs";
+import { StatCards } from "@/components/common/StatCards";
+import type { GridColDef } from "@mui/x-data-grid";
+import ReceiptLongIcon from "@mui/icons-material/ReceiptLongOutlined";
+import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
+import HourglassIcon from "@mui/icons-material/HourglassEmptyOutlined";
 import { useFetch } from "@/components/common/useFetch";
 import { formatMoney } from "@/lib/format";
 import type { InvoiceRow } from "../service";
@@ -30,7 +26,8 @@ const FILTERS = [
   ["", "All invoices"], ["draft", "Drafts"], ["unpaid", "Unpaid"], ["partial", "Partially paid"], ["overdue", "Overdue"], ["paid", "Paid"], ["cancelled", "Cancelled"],
 ] as const;
 
-export function InvoicesList({ clientId, saleId }: { clientId?: string; saleId?: string }) {
+export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, newClientId }: { clientId?: string; saleId?: string; openNew?: boolean; newSaleId?: string; newClientId?: string }) {
+  const [adding, setAdding] = useState(openNew);
   const scoped = Boolean(clientId || saleId);
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -52,72 +49,69 @@ export function InvoicesList({ clientId, saleId }: { clientId?: string; saleId?:
   else if (filter) qs.set("paymentStatus", filter);
   const { data, error, loading, reload } = useFetch<{ items: InvoiceRow[]; total: number; totals: { invoiced: string; outstanding: string } }>(`/api/invoices?${qs}`);
 
-  const newHref = clientId ? `/invoices/new?clientId=${clientId}` : "/invoices/new";
   const showNew = Boolean(clientId) && !saleId;
   const filtered = Boolean(debounced || filter);
 
+  const columns: GridColDef<InvoiceRow>[] = [
+    {
+      field: "invoice_number", headerName: "Invoice", width: 170,
+      renderCell: ({ row: i }) => <Link href={`/invoices/${i.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>{i.invoice_number ?? "Draft"}</Link>,
+    },
+    ...(scoped ? [] : [{ field: "client_name", headerName: "Client", minWidth: 160 } as GridColDef<InvoiceRow>]),
+    ...(saleId ? [] : [{
+      field: "sale_number", headerName: "Sale", width: 110,
+      renderCell: ({ row: i }) => <Link href={`/sales/${i.sale_id}`} onClick={(e) => e.stopPropagation()}>{i.sale_number}</Link>,
+    } as GridColDef<InvoiceRow>]),
+    { field: "issue_date", headerName: "Date", width: 120, valueFormatter: (v: string) => format(new Date(v), "dd MMM yyyy") },
+    { field: "due_date", headerName: "Due", width: 120, valueFormatter: (v: string) => format(new Date(v), "dd MMM yyyy") },
+    { field: "total", headerName: "Total", width: 120, align: "right", headerAlign: "right", valueFormatter: (v: string) => formatMoney(v) },
+    { field: "amount_paid", headerName: "Paid", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.amount_paid) : "—") },
+    { field: "balance_due", headerName: "Balance", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.balance_due) : "—") },
+    { field: "status", headerName: "Status", width: 150, renderCell: ({ row: i }) => <InvoiceStatusChip invoice={i} /> },
+  ];
+
   const body = (
-    <Card variant={scoped ? "elevation" : "outlined"} elevation={0} sx={scoped ? { border: 0 } : undefined}>
-      <Box sx={{ p: scoped ? 0 : 2, pb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-        <TextField size="small" placeholder="Search invoice number or client" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ flex: "1 1 240px", maxWidth: 380 }}
-          slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }, htmlInput: { "aria-label": "Search invoices" } }} />
-        <TextField select size="small" label="Show" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0); }} sx={{ minWidth: 170 }}>
-          {FILTERS.map(([v, l]) => <MenuItem key={v} value={v}>{l}</MenuItem>)}
-        </TextField>
-        {showNew && <Box sx={{ ml: "auto" }}><Button component={Link} href={newHref} variant="contained" startIcon={<AddIcon />}>New invoice</Button></Box>}
-      </Box>
-      {data && data.total > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ px: scoped ? 0 : 2, pb: 1.5 }}>
-          Invoiced (issued invoices): <strong>{formatMoney(data.totals.invoiced)}</strong> · Outstanding (invoiced minus payments allocated): <strong>{formatMoney(data.totals.outstanding)}</strong>
-        </Typography>
+    <>
+      {!scoped && data && data.total > 0 && (
+        <StatCards stats={[
+          { label: "Invoices in view", value: data.total, hint: "matching the current filters", icon: <ReceiptLongIcon /> },
+          { label: "Invoiced", value: formatMoney(data.totals.invoiced), hint: "issued invoices", icon: <PaymentsIcon /> },
+          { label: "Outstanding", value: formatMoney(data.totals.outstanding), hint: "invoiced minus payments allocated", icon: <HourglassIcon /> },
+        ]} />
       )}
-      {error ? <ErrorState message={error} onRetry={reload} />
-        : loading && !data ? <TableSkeleton />
-        : data && data.items.length === 0 ? (
-          <EmptyState title={filtered ? "No invoices match your filters" : "No invoices yet"} hint={filtered ? "Try different filters." : saleId ? "Use “Create invoice” above to bill this sale." : "Invoices are raised against a sale."}
-            action={!filtered && !saleId ? <Button component={Link} href={newHref} variant="contained">New invoice</Button> : undefined} />
-        ) : (
-          <>
-            <TableContainer sx={{ opacity: loading ? 0.6 : 1 }}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Invoice</TableCell>{!scoped && <TableCell>Client</TableCell>}{!saleId && <TableCell>Sale</TableCell>}<TableCell>Date</TableCell><TableCell>Due</TableCell>
-                    <TableCell align="right">Total</TableCell><TableCell align="right">Paid</TableCell><TableCell align="right">Balance</TableCell><TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {data?.items.map((i) => (
-                    <TableRow key={i.id} hover sx={{ cursor: "pointer" }} onClick={() => router.push(`/invoices/${i.id}`)}>
-                      <TableCell>
-                        <Link href={`/invoices/${i.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>{i.invoice_number ?? "Draft"}</Link>
-                      </TableCell>
-                      {!scoped && <TableCell>{i.client_name}</TableCell>}
-                      {!saleId && <TableCell><Link href={`/sales/${i.sale_id}`} onClick={(e) => e.stopPropagation()}>{i.sale_number}</Link></TableCell>}
-                      <TableCell>{format(new Date(i.issue_date), "dd MMM yyyy")}</TableCell>
-                      <TableCell>{format(new Date(i.due_date), "dd MMM yyyy")}</TableCell>
-                      <TableCell align="right">{formatMoney(i.total)}</TableCell>
-                      <TableCell align="right">{i.status === "issued" ? formatMoney(i.amount_paid) : "—"}</TableCell>
-                      <TableCell align="right">{i.status === "issued" ? formatMoney(i.balance_due) : "—"}</TableCell>
-                      <TableCell><InvoiceStatusChip invoice={i} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            <TablePagination component="div" count={data?.total ?? 0} page={page} rowsPerPage={pageSize} rowsPerPageOptions={[10, 20, 50, 100]}
-              onPageChange={(_, p) => setPage(p)} onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }} />
-          </>
+      <ListLayout
+        compact={scoped} onRefresh={reload} refreshing={loading}
+        search={{ value: search, onChange: setSearch, placeholder: "Search invoice number or client", label: "Search invoices" }}
+        tabs={<SegmentedTabs label="Invoice filter" value={filter} onChange={(v) => { setFilter(v); setPage(0); }} tabs={FILTERS.map(([value, label]) => ({ value, label }))} />}
+        actions={showNew ? <Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button> : undefined}
+        notice={scoped && data && data.total > 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ px: 2.5, pb: 1.5 }}>
+            Invoiced (issued invoices): <strong>{formatMoney(data.totals.invoiced)}</strong> · Outstanding (invoiced minus payments allocated): <strong>{formatMoney(data.totals.outstanding)}</strong>
+          </Typography>
+        ) : undefined}
+      >
+        {error ? <ErrorState message={error} onRetry={reload} /> : (
+          <DataTable<InvoiceRow>
+            label="Invoices" rows={data?.items ?? []} columns={columns} total={data?.total ?? 0} loading={loading}
+            page={page} pageSize={pageSize} onPageChange={(p, size) => { setPage(p); setPageSize(size); }}
+            onRowClick={(i) => router.push(`/invoices/${i.id}`)}
+            emptyTitle={filtered ? "No invoices match your filters" : "No invoices yet"}
+            emptyHint={filtered ? "Try different filters." : saleId ? "Use “Create invoice” above to bill this sale." : "Invoices are raised against a sale."}
+            emptyAction={!filtered && !saleId ? <Button onClick={() => setAdding(true)} variant="contained">New invoice</Button> : undefined}
+          />
         )}
-    </Card>
+      </ListLayout>
+    </>
   );
 
-  if (scoped) return body;
+  const dialog = adding ? <NewInvoiceDialog saleId={saleId ?? newSaleId} clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace("/invoices"); }} /> : null;
+  if (scoped) return <>{body}{dialog}</>;
   return (
     <>
-      <PageHeader title="Invoices" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices" }]}
-        actions={<Button component={Link} href={newHref} variant="contained" startIcon={<AddIcon />}>New invoice</Button>} />
+      <PageHeader title="Invoices" subtitle="GST invoices raised against sales" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices" }]}
+        actions={<Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button>} />
       {body}
+      {dialog}
     </>
   );
 }

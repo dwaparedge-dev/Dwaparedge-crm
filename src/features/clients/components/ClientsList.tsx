@@ -4,152 +4,105 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
 import Chip from "@mui/material/Chip";
-import InputAdornment from "@mui/material/InputAdornment";
-import MenuItem from "@mui/material/MenuItem";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import TableSortLabel from "@mui/material/TableSortLabel";
-import TextField from "@mui/material/TextField";
 import AddIcon from "@mui/icons-material/Add";
-import SearchIcon from "@mui/icons-material/Search";
+import type { GridColDef } from "@mui/x-data-grid";
 import { PageHeader } from "@/components/common/PageHeader";
-import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
+import { ErrorState } from "@/components/common/states";
+import { DataTable } from "@/components/common/DataTable";
+import { ListLayout } from "@/components/common/ListLayout";
+import { ClientFormDialog } from "./ClientFormDialog";
+import { StatCards } from "@/components/common/StatCards";
+import BusinessIcon from "@mui/icons-material/BusinessOutlined";
+import HandshakeIcon from "@mui/icons-material/HandshakeOutlined";
+import PersonAddIcon from "@mui/icons-material/PersonAddAltOutlined";
+import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
+import { SegmentedTabs } from "@/components/common/SegmentedTabs";
 import { useFetch } from "@/components/common/useFetch";
 import type { ClientRow } from "../service";
 
-type SortKey = "name" | "created";
 interface ListResponse {
   items: ClientRow[];
   total: number;
+  summary: { current: number; archived: number; newThisMonth: number; withSales: number };
 }
 
 export function StatusChip({ archived }: { archived?: boolean }) {
   return archived ? <Chip size="small" label="Archived" /> : <Chip size="small" label="Active" color="success" variant="outlined" />;
 }
 
-export function ClientsList() {
+export function ClientsList({ openNew = false }: { openNew?: boolean }) {
   const router = useRouter();
+  const [adding, setAdding] = useState(openNew);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [archived, setArchived] = useState("false");
-  const [sort, setSort] = useState<SortKey>("name");
-  const [dir, setDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setDebounced(search.trim());
-      setPage(0);
-    }, 300);
+    const t = setTimeout(() => { setDebounced(search.trim()); setPage(0); }, 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  const qs = new URLSearchParams({ page: String(page + 1), pageSize: String(pageSize), sort, dir, archived });
+  const qs = new URLSearchParams({ page: String(page + 1), pageSize: String(pageSize), sort: "name", dir: "asc", archived });
   if (debounced) qs.set("search", debounced);
   const { data, error, loading, reload } = useFetch<ListResponse>(`/api/clients?${qs}`);
 
-  const toggleSort = (key: SortKey) => {
-    setDir(sort === key && dir === "asc" ? "desc" : "asc");
-    setSort(key);
-    setPage(0);
-  };
+  const columns: GridColDef<ClientRow>[] = [
+    {
+      field: "display_name", headerName: "Client", minWidth: 220,
+      renderCell: ({ row: c }) => (
+        <Box sx={{ minWidth: 0 }}>
+          <Link href={`/clients/${c.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>{c.display_name}</Link>
+          {c.legal_name !== c.display_name && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{c.legal_name}</Box>}
+        </Box>
+      ),
+    },
+    { field: "gstin", headerName: "GSTIN", width: 170, valueFormatter: (v: string | null) => v ?? "—" },
+    {
+      field: "email", headerName: "Contact", minWidth: 200,
+      renderCell: ({ row: c }) => (
+        <Box sx={{ minWidth: 0 }}>
+          {c.email ?? "—"}
+          {c.phone && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{c.phone}</Box>}
+        </Box>
+      ),
+    },
+    { field: "owner_name", headerName: "Owner", width: 150, valueFormatter: (v: string | null) => v ?? "—" },
+    { field: "archived_at", headerName: "Status", width: 110, renderCell: ({ row: c }) => <StatusChip archived={c.archived_at !== null} /> },
+  ];
 
   return (
     <>
       <PageHeader
-        title="Clients"
+        title="Clients" subtitle="Companies you work with, their contacts and history"
         crumbs={[{ label: "Dashboard", href: "/" }, { label: "Clients" }]}
-        actions={
-          <Button component={Link} href="/clients/new" variant="contained" startIcon={<AddIcon />}>
-            Add client
-          </Button>
-        }
+        actions={<Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>Add client</Button>}
       />
-      <Card>
-        <Box sx={{ p: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-          <TextField
-            size="small"
-            placeholder="Search name, GSTIN, email, phone, city"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ flex: "1 1 260px", maxWidth: 420 }}
-            slotProps={{
-              input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> },
-              htmlInput: { "aria-label": "Search clients" },
-            }}
+      <StatCards loading={!data} stats={[
+        { label: "Clients", value: data?.summary.current ?? 0, hint: "current", icon: <BusinessIcon />, onClick: () => { setArchived("false"); setPage(0); } },
+        { label: "With active sales", value: data?.summary.withSales ?? 0, hint: "confirmed or completed", icon: <HandshakeIcon /> },
+        { label: "New this month", value: data?.summary.newThisMonth ?? 0, hint: "added since the 1st", icon: <PersonAddIcon /> },
+        { label: "Archived", value: data?.summary.archived ?? 0, hint: "kept for history", icon: <ArchiveIcon />, selected: archived === "true", onClick: () => { setArchived("true"); setPage(0); } },
+      ]} />
+      <ListLayout
+        onRefresh={reload} refreshing={loading}
+        search={{ value: search, onChange: setSearch, placeholder: "Search name, GSTIN, email, phone, city", label: "Search clients" }}
+        tabs={<SegmentedTabs label="Client list" value={archived} onChange={(v) => { setArchived(v); setPage(0); }} tabs={[{ value: "false", label: "Current" }, { value: "true", label: "Archived" }]} />}
+      >
+        {error ? <Box sx={{ p: 2 }}><ErrorState message={error} onRetry={reload} /></Box> : (
+          <DataTable<ClientRow>
+            label="Clients" rows={data?.items ?? []} columns={columns} total={data?.total ?? 0} loading={loading}
+            page={page} pageSize={pageSize} onPageChange={(p, size) => { setPage(p); setPageSize(size); }}
+            onRowClick={(c) => router.push(`/clients/${c.id}`)}
+            emptyTitle={debounced ? "No clients match your filters" : archived === "true" ? "No archived clients" : "No clients yet"}
+            emptyHint={debounced ? "Try a different search or clear the filters." : "Add your first client to get started."}
+            emptyAction={!debounced && archived === "false" ? <Button onClick={() => setAdding(true)} variant="contained">Add client</Button> : undefined}
           />
-          <TextField select size="small" label="Show" value={archived} onChange={(e) => { setArchived(e.target.value); setPage(0); }} sx={{ minWidth: 140 }}>
-            <MenuItem value="false">Current</MenuItem>
-            <MenuItem value="true">Archived</MenuItem>
-          </TextField>
-        </Box>
-
-        {error ? (
-          <Box sx={{ p: 2 }}><ErrorState message={error} onRetry={reload} /></Box>
-        ) : loading && !data ? (
-          <TableSkeleton />
-        ) : data && data.items.length === 0 ? (
-          <EmptyState
-            title={debounced ? "No clients match your filters" : archived === "true" ? "No archived clients" : "No clients yet"}
-            hint={debounced ? "Try a different search or clear the filters." : "Add your first client to get started."}
-            action={!debounced && archived === "false" ? <Button component={Link} href="/clients/new" variant="contained">Add client</Button> : undefined}
-          />
-        ) : (
-          <>
-            <TableContainer sx={{ opacity: loading ? 0.6 : 1 }}>
-              <Table size="medium">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sortDirection={sort === "name" ? dir : false}>
-                      <TableSortLabel active={sort === "name"} direction={dir} onClick={() => toggleSort("name")}>Client</TableSortLabel>
-                    </TableCell>
-                    <TableCell>GSTIN</TableCell>
-                    <TableCell>Contact</TableCell>
-                    <TableCell>Owner</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {data?.items.map((c) => (
-                    <TableRow key={c.id} hover sx={{ cursor: "pointer" }} onClick={() => router.push(`/clients/${c.id}`)}>
-                      <TableCell>
-                        <Link href={`/clients/${c.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>
-                          {c.display_name}
-                        </Link>
-                        {c.legal_name !== c.display_name && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{c.legal_name}</Box>}
-                      </TableCell>
-                      <TableCell>{c.gstin ?? "—"}</TableCell>
-                      <TableCell>
-                        {c.email ?? "—"}
-                        {c.phone && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{c.phone}</Box>}
-                      </TableCell>
-                      <TableCell>{c.owner_name ?? "—"}</TableCell>
-                      <TableCell><StatusChip archived={c.archived_at !== null} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            <TablePagination
-              component="div"
-              count={data?.total ?? 0}
-              page={page}
-              rowsPerPage={pageSize}
-              rowsPerPageOptions={[10, 20, 50, 100]}
-              onPageChange={(_, p) => setPage(p)}
-              onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}
-            />
-          </>
         )}
-      </Card>
+      </ListLayout>
+      {adding && <ClientFormDialog onClose={() => { setAdding(false); if (openNew) router.replace("/clients"); }} onSaved={(id) => { setAdding(false); router.push(`/clients/${id}`); router.refresh(); }} />}
     </>
   );
 }

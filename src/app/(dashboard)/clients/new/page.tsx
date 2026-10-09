@@ -1,5 +1,5 @@
-import { ClientFormPage } from "@/features/clients/components/ClientFormPage";
+import { ClientsList } from "@/features/clients/components/ClientsList";
 
 export default function NewClientPage() {
-  return <ClientFormPage />;
+  return <ClientsList openNew />;
 }

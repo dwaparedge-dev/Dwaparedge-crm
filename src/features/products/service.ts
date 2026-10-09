@@ -49,9 +49,17 @@ export async function listProducts(p: z.infer<typeof listProductsSchema>) {
       return rest;
     }),
     total: Number(rows[0]?.total ?? 0),
+    summary: await productSummary(),
     page: p.page,
     pageSize: p.pageSize,
   };
+}
+
+async function productSummary() {
+  const r = await db.queryOne<{ total: string; active: string; inactive: string; types: string }>(
+    `SELECT count(*) AS total, count(*) FILTER (WHERE is_active) AS active, count(*) FILTER (WHERE NOT is_active) AS inactive, count(DISTINCT type) AS types FROM products`,
+  );
+  return { total: Number(r?.total ?? 0), active: Number(r?.active ?? 0), inactive: Number(r?.inactive ?? 0), types: Number(r?.types ?? 0) };
 }
 
 export async function getProduct(id: string) {

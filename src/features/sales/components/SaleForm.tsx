@@ -1,15 +1,13 @@
 "use client";
 import { useState } from "react";
 import { Controller, useForm, useWatch, type UseFormReturn } from "react-hook-form";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Grid from "@mui/material/Grid";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import { FormShell } from "@/components/common/FormShell";
 import { ClientPicker } from "@/components/common/ClientPicker";
 import { LineItemsEditor, EMPTY_LINE, useItemsTotals, type ItemsForm, type LineItem } from "@/components/forms/LineItemsEditor";
 import { useFetch } from "@/components/common/useFetch";
@@ -33,6 +31,7 @@ export const emptySale = (clientId = ""): SaleFormValues => ({
 });
 
 interface Props {
+  open: boolean;
   initial: SaleFormValues;
   saleId?: string;
   lockClient?: boolean;
@@ -40,7 +39,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export function SaleForm({ initial, saleId, lockClient, onSaved, onCancel }: Props) {
+export function SaleForm({ open, initial, saleId, lockClient, onSaved, onCancel }: Props) {
   const form = useForm<SaleFormValues>({ defaultValues: initial });
   const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = form;
   const totals = useItemsTotals(useWatch({ control, name: "items" }));
@@ -71,8 +70,8 @@ export function SaleForm({ initial, saleId, lockClient, onSaved, onCancel }: Pro
   }
 
   return (
-    <Box component="form" noValidate onSubmit={handleSubmit(submit)}>
-      {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
+    <FormShell open={open} title={saleId ? "Edit sale" : "Add sale"} maxWidth="lg" onClose={onCancel} onSubmit={handleSubmit(submit)}
+      submitting={isSubmitting} submitDisabled={totals === null} submitLabel={saleId ? "Save changes" : "Create sale"} error={formError}>
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>Sale details</Typography>
@@ -121,16 +120,12 @@ export function SaleForm({ initial, saleId, lockClient, onSaved, onCancel }: Pro
         </CardContent>
       </Card>
 
-      <Card sx={{ mb: 3 }}>
+      <Card>
         <CardContent>
           <TextField label="Notes" multiline minRows={3} fullWidth {...register("notes")} />
         </CardContent>
       </Card>
 
-      <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
-        <Button onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
-        <Button type="submit" variant="contained" disabled={isSubmitting || totals === null}>{isSubmitting ? "Saving…" : saleId ? "Save changes" : "Create sale"}</Button>
-      </Box>
-    </Box>
+    </FormShell>
   );
 }

@@ -1,6 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Box from "@mui/material/Box";
+import Dialog from "@mui/material/Dialog";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import IconButton from "@mui/material/IconButton";
+import CloseIcon from "@mui/icons-material/Close";
 import Alert from "@mui/material/Alert";
 import Autocomplete from "@mui/material/Autocomplete";
 import Card from "@mui/material/Card";
@@ -9,7 +15,6 @@ import Skeleton from "@mui/material/Skeleton";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useNotify } from "@/components/common/Notify";
-import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
@@ -20,7 +25,7 @@ import type { MilestoneRow, SaleItemRow, SaleRow } from "@/features/sales/servic
 type Detail = SaleRow & { items: SaleItemRow[]; milestones: MilestoneRow[] };
 
 /** Invoices are raised against a sale: choose the sale, then how much of it to bill. */
-export function NewInvoicePage({ saleId: initialSale, clientId }: { saleId?: string; clientId?: string }) {
+export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose }: { saleId?: string; clientId?: string; onClose: () => void }) {
   const router = useRouter();
   const notify = useNotify();
   const [saleId, setSaleId] = useState(initialSale ?? "");
@@ -39,8 +44,12 @@ export function NewInvoicePage({ saleId: initialSale, clientId }: { saleId?: str
   }, [search, clientId]);
 
   return (
-    <>
-      <PageHeader title="New invoice" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices", href: "/invoices" }, { label: "New" }]} />
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
+      <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", pt: 2.5, pb: 2, borderBottom: "1px solid var(--mui-palette-divider)" }}>
+        <Box component="span" sx={{ fontWeight: 700, fontSize: "1.1rem" }}>New invoice</Box>
+        <IconButton onClick={onClose} size="small" aria-label="Close"><CloseIcon fontSize="small" /></IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ "&&": { pt: 2.5 }, "& .MuiCard-root": { boxShadow: "none", border: "1px solid var(--mui-palette-divider)", borderRadius: 2, mb: 2 } }}>
       <Alert severity="info" sx={{ mb: 2 }}>Every invoice is raised against a sale. Pick a confirmed sale that still has something left to bill. To bill something new, add it to a sale first.</Alert>
       <Card sx={{ mb: 2 }}>
         <CardContent>
@@ -68,12 +77,13 @@ export function NewInvoicePage({ saleId: initialSale, clientId }: { saleId?: str
             <CardContent>
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>How much of {sale.data.sale_number} to bill</Typography>
               <BillSaleForm saleId={sale.data.id} subtotal={sale.data.subtotal} items={sale.data.items} milestones={sale.data.milestones}
-                onCancel={() => router.push("/invoices")}
+                onCancel={onClose}
                 onCreated={(id) => { notify.success("Draft invoice created. Review it, then issue it."); router.push(`/invoices/${id}`); }} />
             </CardContent>
           </Card>
         )
       )}
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }

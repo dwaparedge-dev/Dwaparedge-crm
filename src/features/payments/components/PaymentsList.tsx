@@ -4,24 +4,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
 import Chip from "@mui/material/Chip";
-import InputAdornment from "@mui/material/InputAdornment";
-import MenuItem from "@mui/material/MenuItem";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
-import SearchIcon from "@mui/icons-material/Search";
 import { format, parseISO } from "date-fns";
 import { PageHeader } from "@/components/common/PageHeader";
-import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
+import { ErrorState } from "@/components/common/states";
+import { DataTable } from "@/components/common/DataTable";
+import { ListLayout } from "@/components/common/ListLayout";
+import { SegmentedTabs } from "@/components/common/SegmentedTabs";
+import { StatCards } from "@/components/common/StatCards";
+import type { GridColDef } from "@mui/x-data-grid";
+import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
+import SavingsIcon from "@mui/icons-material/SavingsOutlined";
+import HourglassIcon from "@mui/icons-material/HourglassEmptyOutlined";
 import { useFetch } from "@/components/common/useFetch";
 import { formatMoney } from "@/lib/format";
 import { OptionFilter, OptionLabel } from "@/features/options/components/OptionSelect";
@@ -52,69 +48,65 @@ export function PaymentsList({ clientId, saleId, saleNumber, suggestedAmount, on
   const { data, error, loading, reload } = useFetch<{ items: PaymentRow[]; total: number; totals: { collected: string; unallocated: string } }>(`/api/payments?${qs}`);
   const filtered = Boolean(debounced || method);
 
+  const columns: GridColDef<PaymentRow>[] = [
+    {
+      field: "receipt_number", headerName: "Receipt", minWidth: 190,
+      renderCell: ({ row: p }) => (
+        <Box sx={{ minWidth: 0, opacity: p.voided_at ? 0.55 : 1 }}>
+          <Link href={`/payments/${p.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>{p.receipt_number}</Link>
+          {p.voided_at && <Chip size="small" label="Voided" sx={{ ml: 1 }} />}
+          {p.reference && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{p.reference}</Box>}
+        </Box>
+      ),
+    },
+    ...(scoped ? [] : [{ field: "client_name", headerName: "Client", minWidth: 160 } as GridColDef<PaymentRow>]),
+    { field: "payment_date", headerName: "Date", width: 120, valueFormatter: (v: string) => format(parseISO(v), "dd MMM yyyy") },
+    { field: "method", headerName: "Method", width: 140, renderCell: ({ row: p }) => <OptionLabel table="payments" column="method" value={p.method} /> },
+    { field: "amount", headerName: "Amount", width: 130, align: "right", headerAlign: "right", valueFormatter: (v: string) => formatMoney(v) },
+    ...(saleId ? [{ field: "applied_to_sale", headerName: "Applied to this sale", width: 160, align: "right", headerAlign: "right", valueFormatter: (v: string | null) => formatMoney(v ?? "0") } as GridColDef<PaymentRow>] : []),
+    { field: "unallocated", headerName: "Unallocated", width: 130, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.voided_at ? "—" : formatMoney(r.unallocated)) },
+  ];
+
   const body = (
-    <Card variant={scoped ? "elevation" : "outlined"} elevation={0} sx={scoped ? { border: 0 } : undefined}>
-      <Box sx={{ p: scoped ? 0 : 2, pb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-        <TextField size="small" placeholder="Search receipt, reference or client" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ flex: "1 1 240px", maxWidth: 380 }}
-          slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }, htmlInput: { "aria-label": "Search payments" } }} />
-        <OptionFilter table="payments" column="method" label="Method" value={method} onChange={(v) => { setMethod(v); setPage(0); }} />
-        <TextField select size="small" label="Voided" value={String(voided)} onChange={(e) => { setVoided(e.target.value === "true"); setPage(0); }} sx={{ minWidth: 150 }}>
-          <MenuItem value="false">Hide voided</MenuItem>
-          <MenuItem value="true">Include voided</MenuItem>
-        </TextField>
-        {scoped && <Box sx={{ ml: "auto" }}><Button variant="contained" startIcon={<AddIcon />} onClick={() => setRecording(true)}>Record payment</Button></Box>}
-      </Box>
-      {data && data.total > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ px: scoped ? 0 : 2, pb: 1.5 }}>
-          Collected (payments received, not voided): <strong>{formatMoney(data.totals.collected)}</strong> · Not yet allocated to invoices (advances): <strong>{formatMoney(data.totals.unallocated)}</strong>
-        </Typography>
+    <>
+      {!scoped && data && data.total > 0 && (
+        <StatCards stats={[
+          { label: "Payments in view", value: data.total, hint: "matching the current filters", icon: <PaymentsIcon /> },
+          { label: "Collected", value: formatMoney(data.totals.collected), hint: "received, not voided", icon: <SavingsIcon /> },
+          { label: "Advances", value: formatMoney(data.totals.unallocated), hint: "not yet allocated to invoices", icon: <HourglassIcon /> },
+        ]} />
       )}
-      {error ? <ErrorState message={error} onRetry={reload} />
-        : loading && !data ? <TableSkeleton />
-        : data && data.items.length === 0 ? (
-          <EmptyState title={filtered ? "No payments match your filters" : "No payments yet"} hint={filtered ? "Try different filters." : "Record a payment when money is received from a client."}
-            action={!filtered ? <Button variant="contained" onClick={() => setRecording(true)}>Record payment</Button> : undefined} />
-        ) : (
-          <>
-            <TableContainer sx={{ opacity: loading ? 0.6 : 1 }}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Receipt</TableCell>{!scoped && <TableCell>Client</TableCell>}<TableCell>Date</TableCell><TableCell>Method</TableCell>
-                    <TableCell align="right">Amount</TableCell>{saleId && <TableCell align="right">Applied to this sale</TableCell>}<TableCell align="right">Unallocated</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {data?.items.map((p) => (
-                    <TableRow key={p.id} hover sx={{ cursor: "pointer", opacity: p.voided_at ? 0.55 : 1 }} onClick={() => router.push(`/payments/${p.id}`)}>
-                      <TableCell>
-                        <Link href={`/payments/${p.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>{p.receipt_number}</Link>
-                        {p.voided_at && <Chip size="small" label="Voided" sx={{ ml: 1 }} />}
-                        {p.reference && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{p.reference}</Box>}
-                      </TableCell>
-                      {!scoped && <TableCell>{p.client_name}</TableCell>}
-                      <TableCell>{format(parseISO(p.payment_date), "dd MMM yyyy")}</TableCell>
-                      <TableCell><OptionLabel table="payments" column="method" value={p.method} /></TableCell>
-                      <TableCell align="right">{formatMoney(p.amount)}</TableCell>
-                      {saleId && <TableCell align="right">{formatMoney(p.applied_to_sale ?? "0")}</TableCell>}
-                      <TableCell align="right">{p.voided_at ? "—" : formatMoney(p.unallocated)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            <TablePagination component="div" count={data?.total ?? 0} page={page} rowsPerPage={pageSize} rowsPerPageOptions={[10, 20, 50, 100]}
-              onPageChange={(_, p) => setPage(p)} onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }} />
-          </>
+      <ListLayout
+        compact={scoped} onRefresh={reload} refreshing={loading}
+        search={{ value: search, onChange: setSearch, placeholder: "Search receipt, reference or client", label: "Search payments" }}
+        filters={<OptionFilter table="payments" column="method" label="Method" value={method} onChange={(v) => { setMethod(v); setPage(0); }} />}
+        tabs={<SegmentedTabs label="Voided payments" value={String(voided)} onChange={(v) => { setVoided(v === "true"); setPage(0); }} tabs={[{ value: "false", label: "Active" }, { value: "true", label: "Include voided" }]} />}
+        actions={scoped ? <Button variant="contained" startIcon={<AddIcon />} onClick={() => setRecording(true)}>Record payment</Button> : undefined}
+        notice={scoped && data && data.total > 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ px: 2.5, pb: 1.5 }}>
+            Collected (payments received, not voided): <strong>{formatMoney(data.totals.collected)}</strong> · Not yet allocated to invoices (advances): <strong>{formatMoney(data.totals.unallocated)}</strong>
+          </Typography>
+        ) : undefined}
+      >
+        {error ? <ErrorState message={error} onRetry={reload} /> : (
+          <DataTable<PaymentRow>
+            label="Payments" rows={data?.items ?? []} columns={columns} total={data?.total ?? 0} loading={loading}
+            page={page} pageSize={pageSize} onPageChange={(p, size) => { setPage(p); setPageSize(size); }}
+            onRowClick={(p) => router.push(`/payments/${p.id}`)}
+            emptyTitle={filtered ? "No payments match your filters" : "No payments yet"}
+            emptyHint={filtered ? "Try different filters." : "Record a payment when money is received from a client."}
+            emptyAction={!filtered ? <Button variant="contained" onClick={() => setRecording(true)}>Record payment</Button> : undefined}
+          />
         )}
+      </ListLayout>
       {recording && <RecordPaymentDialog clientId={clientId} saleId={saleId} saleNumber={saleNumber} suggestedAmount={suggestedAmount} onClose={() => setRecording(false)} onSaved={(id) => { setRecording(false); if (saleId) { reload(); onChanged?.(); } else router.push(`/payments/${id}`); }} />}
-    </Card>
+    </>
   );
 
   if (scoped) return body;
   return (
     <>
-      <PageHeader title="Payments" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Payments" }]}
+      <PageHeader title="Payments" subtitle="Money received, allocations to invoices and advances" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Payments" }]}
         actions={<Button variant="contained" startIcon={<AddIcon />} onClick={() => setRecording(true)}>Record payment</Button>} />
       {body}
     </>

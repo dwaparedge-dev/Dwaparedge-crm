@@ -61,9 +61,21 @@ export async function listClients(p: ListClientsParams) {
       return rest;
     }),
     total: Number(rows[0]?.total ?? 0),
+    summary: await clientSummary(),
     page: p.page,
     pageSize: p.pageSize,
   };
+}
+
+async function clientSummary() {
+  const r = await db.queryOne<{ current: string; archived: string; recent: string; with_sales: string }>(
+    `SELECT count(*) FILTER (WHERE archived_at IS NULL) AS current,
+            count(*) FILTER (WHERE archived_at IS NOT NULL) AS archived,
+            count(*) FILTER (WHERE archived_at IS NULL AND created_at >= date_trunc('month', now())) AS recent,
+            count(*) FILTER (WHERE archived_at IS NULL AND EXISTS (SELECT 1 FROM sales s WHERE s.client_id = clients.id AND s.status IN ('confirmed','completed'))) AS with_sales
+     FROM clients`,
+  );
+  return { current: Number(r?.current ?? 0), archived: Number(r?.archived ?? 0), newThisMonth: Number(r?.recent ?? 0), withSales: Number(r?.with_sales ?? 0) };
 }
 
 export async function getClient(id: string): Promise<ClientRow> {

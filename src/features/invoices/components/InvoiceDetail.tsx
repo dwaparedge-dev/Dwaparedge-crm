@@ -5,9 +5,6 @@ import { useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
-import CardContent from "@mui/material/CardContent";
-import Grid from "@mui/material/Grid";
 import Skeleton from "@mui/material/Skeleton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -19,9 +16,16 @@ import Typography from "@mui/material/Typography";
 import { format, parseISO } from "date-fns";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useNotify } from "@/components/common/Notify";
-import { PageHeader } from "@/components/common/PageHeader";
 import { ReasonDialog } from "@/components/common/ReasonDialog";
+import { DetailTabPanel, DetailViewHeroSidebar, DetailViewLayout, DetailViewMetricStrip, DetailViewTabs, MasterStatusBadge } from "@/components/shared/DetailView";
+import ListAltIcon from "@mui/icons-material/ListAltOutlined";
+import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
+import ReceiptIcon from "@mui/icons-material/ReceiptLongOutlined";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfOutlined";
+import DownloadIcon from "@mui/icons-material/DownloadOutlined";
+import EditIcon from "@mui/icons-material/EditOutlined";
 import { ErrorState } from "@/components/common/states";
+import { HeroActions } from "@/components/common/HeroActions";
 import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
@@ -29,19 +33,11 @@ import { stateNameByCode } from "@/lib/india";
 import { OptionLabel } from "@/features/options/components/OptionSelect";
 import { RecordPaymentDialog } from "@/features/payments/components/RecordPaymentDialog";
 import type { InvoiceItemRow, InvoiceRow } from "../service";
-import { InvoiceStatusChip } from "./common";
+import { InvoiceFormDialog } from "./InvoiceFormDialog";
 
 type Allocation = { id: string; payment_id: string; receipt_number: string; payment_date: string; method: string; amount: string; reversed_at: string | null };
 type Detail = InvoiceRow & { items: InvoiceItemRow[]; allocations: Allocation[] };
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" component="div" sx={{ whiteSpace: "pre-line" }}>{children || "—"}</Typography>
-    </Box>
-  );
-}
 const Row = ({ label, value, strong }: { label: string; value: string; strong?: boolean }) => (
   <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}>
     <Typography color={strong ? "text.primary" : "text.secondary"} sx={{ fontWeight: strong ? 700 : 400 }}>{label}</Typography>
@@ -56,6 +52,8 @@ export function InvoiceDetail({ id }: { id: string }) {
   const sale = useFetch<{ advance: string; sale_number: string }>(inv ? `/api/sales/${inv.sale_id}` : null);
   const [dialog, setDialog] = useState<"issue" | "cancel" | "delete" | "pay" | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
   if (loading || !inv) return <><Skeleton width={300} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
@@ -111,52 +109,77 @@ export function InvoiceDetail({ id }: { id: string }) {
   }
 
   const live = inv.allocations.filter((a) => !a.reversed_at);
+  const statusLabel = isDraft ? "Draft" : inv.status === "cancelled" ? "Cancelled" : inv.payment_status === "paid" ? "Paid" : inv.is_overdue ? (inv.payment_status === "partial" ? "Overdue · partial" : "Overdue") : inv.payment_status === "partial" ? "Partially paid" : "Unpaid";
+  const statusKey = isDraft ? "pending" : inv.status === "cancelled" ? "inactive" : inv.payment_status === "paid" ? "completed" : inv.is_overdue ? "warning" : "info";
+  const tabs = [
+    { key: "lines", label: "Invoice lines", icon: <ListAltIcon sx={{ fontSize: 18 }} /> },
+    ...(!isDraft ? [{ key: "payments", label: "Payments applied", icon: <PaymentsIcon sx={{ fontSize: 18 }} />, count: live.length || undefined }] : []),
+  ];
   return (
     <>
-      <PageHeader
-        title={<>{inv.invoice_number ?? "Draft invoice"} <InvoiceStatusChip invoice={inv} /></>}
-        crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices", href: "/invoices" }, { label: inv.invoice_number ?? "Draft" }]}
-        actions={
-          <>
-            <Button variant="outlined" href={pdf} target="_blank" rel="noopener">{isDraft ? "Preview PDF" : "View PDF"}</Button>
-            {!isDraft && <Button variant="outlined" href={`${pdf}?download=1`}>Download</Button>}
-            {isDraft && <Button component={Link} href={`/invoices/${id}/edit`} variant="outlined">Edit</Button>}
-            {isDraft && <Button color="error" variant="outlined" onClick={() => setDialog("delete")}>Delete draft</Button>}
-            {isDraft && <Button variant="contained" onClick={() => setDialog("issue")}>Issue invoice</Button>}
-            {inv.status === "issued" && Number(inv.balance_due) > 0 && <Button variant="contained" onClick={() => setDialog("pay")}>Record payment</Button>}
-            {inv.status === "issued" && <Button color="error" variant="outlined" onClick={() => setDialog("cancel")}>Cancel invoice</Button>}
-          </>
+      <DetailViewLayout
+        onBack={() => router.push("/invoices")}
+        backLabel="Back to Invoices"
+        sidebar={
+          <DetailViewHeroSidebar
+            onBack={() => router.push("/invoices")}
+            backLabel="Back to Invoices"
+            title={inv.invoice_number ?? "Draft invoice"}
+            titleLabel="Invoice number"
+            subtitle={snap?.name ?? inv.client_name}
+            subtitleLabel="Client"
+            copyValue={inv.invoice_number ?? undefined}
+            avatarIcon={<ReceiptIcon sx={{ fontSize: 32 }} />}
+            badges={<MasterStatusBadge status={statusKey} customLabel={statusLabel} />}
+            attributes={[
+              { label: "Client", value: <Link href={`/clients/${inv.client_id}`}>{snap?.name ?? inv.client_name}</Link> },
+              ...(snap?.gstin ? [{ label: "Client GSTIN", value: snap.gstin, isMonospace: true }] : []),
+              { label: "Sale", value: <Link href={`/sales/${inv.sale_id}`}>{inv.sale_number}</Link> },
+              { label: "Invoice date", value: format(parseISO(inv.issue_date), "dd MMM yyyy") },
+              { label: "Due date", value: format(parseISO(inv.due_date), "dd MMM yyyy") },
+              { label: "Place of supply", value: inv.place_of_supply_state_code ? `${stateNameByCode(inv.place_of_supply_state_code)} (${inv.place_of_supply_state_code})` : "—" },
+              ...(inv.supply_type ? [{ label: "Tax type", value: inv.supply_type === "intra" ? "CGST + SGST" : "IGST" }] : []),
+              ...(snap?.billingAddress ? [{ label: "Billing address", value: snap.billingAddress }] : []),
+              ...(inv.payment_terms || inv.notes ? [{ label: "Terms & notes", value: [inv.payment_terms, inv.notes].filter(Boolean).join("\n") }] : []),
+            ]}
+            actions={
+              <HeroActions>
+                {isDraft && <Button fullWidth variant="contained" onClick={() => setDialog("issue")}>Issue invoice</Button>}
+                {inv.status === "issued" && Number(inv.balance_due) > 0 && <Button fullWidth variant="contained" onClick={() => setDialog("pay")}>Record payment</Button>}
+                <Button fullWidth variant="outlined" startIcon={<PictureAsPdfIcon />} href={pdf} target="_blank" rel="noopener">{isDraft ? "Preview PDF" : "View PDF"}</Button>
+                {!isDraft && <Button fullWidth variant="outlined" startIcon={<DownloadIcon />} href={`${pdf}?download=1`}>Download</Button>}
+                {isDraft && <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit draft</Button>}
+                {isDraft && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("delete")}>Delete draft</Button>}
+                {inv.status === "issued" && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("cancel")}>Cancel invoice</Button>}
+              </HeroActions>
+            }
+          />
         }
-      />
-      {inv.status === "issued" && Number(sale.data?.advance ?? 0) > 0 && Number(inv.balance_due) > 0 && (
+        metricStrip={
+          <DetailViewMetricStrip
+            columns={4}
+            metrics={[
+              { label: "Taxable value", value: formatMoney(inv.subtotal), subtitle: "before GST" },
+              { label: "GST", value: formatMoney(inv.tax_total), subtitle: inv.supply_type === "intra" ? "CGST + SGST" : inv.supply_type === "inter" ? "IGST" : undefined },
+              { label: "Invoice total", value: formatMoney(inv.total), subtitle: "grand total" },
+              inv.status === "issued"
+                ? { label: "Balance due", value: formatMoney(inv.balance_due), subtitle: `${formatMoney(inv.amount_paid)} paid`, color: Number(inv.balance_due) > 0 ? "#f59e0b" : "#10b981" }
+                : { label: "Status", value: statusLabel, subtitle: isDraft ? "not yet issued" : "no longer payable" },
+            ]}
+          />
+        }
+      >
+        {inv.status === "issued" && Number(sale.data?.advance ?? 0) > 0 && Number(inv.balance_due) > 0 && (
         <Alert severity="info" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={applyAdvance} disabled={busy}>Apply advance</Button>}>
           {formatMoney(sale.data!.advance)} was received in advance for sale {inv.sale_number}. Apply it to this invoice.
         </Alert>
       )}
-      {isDraft && <Alert severity="info" sx={{ mb: 2 }}>Draft: not numbered and not yet a financial record. Review it, then issue it.</Alert>}
-      {inv.status === "cancelled" && <Alert severity="error" sx={{ mb: 2 }}>Cancelled on {inv.cancelled_at && format(new Date(inv.cancelled_at), "dd MMM yyyy")}: {inv.cancel_reason}</Alert>}
-      {inv.status === "issued" && inv.is_overdue && <Alert severity="warning" sx={{ mb: 2 }}>This invoice was due on {format(parseISO(inv.due_date), "dd MMM yyyy")} and still has a balance of {formatMoney(inv.balance_due)}.</Alert>}
+        {isDraft && <Alert severity="info" sx={{ mb: 2 }}>Draft: not numbered and not yet a financial record. Review it, then issue it.</Alert>}
+        {inv.status === "cancelled" && <Alert severity="error" sx={{ mb: 2 }}>Cancelled on {inv.cancelled_at && format(new Date(inv.cancelled_at), "dd MMM yyyy")}: {inv.cancel_reason}</Alert>}
+        {inv.status === "issued" && inv.is_overdue && <Alert severity="warning" sx={{ mb: 2 }}>This invoice was due on {format(parseISO(inv.due_date), "dd MMM yyyy")} and still has a balance of {formatMoney(inv.balance_due)}.</Alert>}
 
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, md: 4 }}>
-              <Field label="Client"><Link href={`/clients/${inv.client_id}`}>{snap?.name ?? inv.client_name}</Link>{snap?.gstin && <Box sx={{ color: "text.secondary" }}>GSTIN {snap.gstin}</Box>}</Field>
-            </Grid>
-            <Grid size={{ xs: 6, md: 2 }}><Field label="Invoice date">{format(parseISO(inv.issue_date), "dd MMM yyyy")}</Field></Grid>
-            <Grid size={{ xs: 6, md: 2 }}><Field label="Due date">{format(parseISO(inv.due_date), "dd MMM yyyy")}</Field></Grid>
-            <Grid size={{ xs: 6, md: 2 }}><Field label="Sale"><Link href={`/sales/${inv.sale_id}`}>{inv.sale_number}</Link></Field></Grid>
-            <Grid size={{ xs: 6, md: 2 }}>
-              <Field label="Place of supply">{inv.place_of_supply_state_code ? `${stateNameByCode(inv.place_of_supply_state_code)} (${inv.place_of_supply_state_code})` : null}{inv.supply_type && <Box sx={{ color: "text.secondary" }}>{inv.supply_type === "intra" ? "CGST + SGST" : "IGST"}</Box>}</Field>
-            </Grid>
-            {snap?.billingAddress && <Grid size={{ xs: 12, md: 6 }}><Field label="Billing address">{snap.billingAddress}</Field></Grid>}
-            {(inv.payment_terms || inv.notes) && <Grid size={{ xs: 12, md: 6 }}><Field label="Terms & notes">{[inv.payment_terms, inv.notes].filter(Boolean).join("\n")}</Field></Grid>}
-          </Grid>
-        </CardContent>
-      </Card>
-
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
+        <DetailViewTabs tabs={tabs} activeTab={Math.min(tab, tabs.length - 1)} onChange={setTab}>
+          <DetailTabPanel value={tab} index={0}>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -188,13 +211,16 @@ export function InvoiceDetail({ id }: { id: string }) {
             <Row label="Grand total" value={formatMoney(inv.total)} strong />
             {inv.status === "issued" && <><Row label="Paid (allocated payments)" value={formatMoney(inv.amount_paid)} /><Row label="Balance due" value={formatMoney(inv.balance_due)} strong /></>}
           </Box>
-        </CardContent>
-      </Card>
-
-      {!isDraft && (
-        <Card>
-          <CardContent>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Payments applied</Typography>
+            <Box sx={{ ml: "auto", mt: 2, maxWidth: 340 }}>
+              <Row label="Taxable value" value={formatMoney(inv.subtotal)} />
+              {inv.supply_type === "intra" ? <><Row label="CGST" value={formatMoney(inv.cgst_total)} /><Row label="SGST" value={formatMoney(inv.sgst_total)} /></> : <Row label="IGST" value={formatMoney(inv.igst_total)} />}
+              {Number(inv.round_off) !== 0 && <Row label="Round off" value={formatMoney(inv.round_off)} />}
+              <Row label="Grand total" value={formatMoney(inv.total)} strong />
+              {inv.status === "issued" && <><Row label="Paid (allocated payments)" value={formatMoney(inv.amount_paid)} /><Row label="Balance due" value={formatMoney(inv.balance_due)} strong /></>}
+            </Box>
+          </DetailTabPanel>
+          {!isDraft && (
+            <DetailTabPanel value={tab} index={1}>
             {inv.allocations.length === 0 ? <Typography color="text.secondary">No payments have been allocated to this invoice.</Typography> : (
               <TableContainer>
                 <Table size="small">
@@ -214,9 +240,10 @@ export function InvoiceDetail({ id }: { id: string }) {
               </TableContainer>
             )}
             {live.length > 0 && <Typography variant="caption" color="text.secondary">To cancel this invoice, first reverse its payment allocations from the payment page.</Typography>}
-          </CardContent>
-        </Card>
-      )}
+            </DetailTabPanel>
+          )}
+        </DetailViewTabs>
+      </DetailViewLayout>
 
       <ConfirmDialog open={dialog === "issue"} title="Issue this invoice?" busy={busy} confirmLabel="Issue invoice" onClose={() => setDialog(null)} onConfirm={issue}
         message="An invoice number will be assigned and the invoice becomes a permanent record: it can no longer be edited or deleted, only cancelled with a reason." />
@@ -229,6 +256,7 @@ export function InvoiceDetail({ id }: { id: string }) {
       {dialog === "pay" && (
         <RecordPaymentDialog clientId={inv.client_id} saleId={inv.sale_id} saleNumber={inv.sale_number} suggestedAmount={inv.balance_due} focusInvoiceId={inv.id} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); reload(); }} />
       )}
+      {editing && <InvoiceFormDialog invoiceId={id} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
     </>
   );
 }

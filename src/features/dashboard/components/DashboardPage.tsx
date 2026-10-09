@@ -18,6 +18,15 @@ import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
 import { format, parseISO } from "date-fns";
 import { useRouter } from "next/navigation";
+import { StatCard, ACCENT_AMBER, ACCENT_CYAN, ACCENT_EMERALD, ACCENT_INDIGO, ACCENT_VIOLET } from "@/components/shared/StatCard";
+import BusinessIcon from "@mui/icons-material/BusinessOutlined";
+import HandshakeIcon from "@mui/icons-material/HandshakeOutlined";
+import ReceiptIcon from "@mui/icons-material/ReceiptLongOutlined";
+import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
+import HourglassIcon from "@mui/icons-material/HourglassEmptyOutlined";
+import SavingsIcon from "@mui/icons-material/SavingsOutlined";
+import EventIcon from "@mui/icons-material/EventOutlined";
+import VerifiedIcon from "@mui/icons-material/VerifiedOutlined";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
@@ -27,22 +36,27 @@ import { RecordPaymentDialog } from "@/features/payments/components/RecordPaymen
 import type { getDashboard } from "../service";
 
 type Data = Awaited<ReturnType<typeof getDashboard>>;
+const ACCENTS = [ACCENT_INDIGO, ACCENT_CYAN, ACCENT_EMERALD, ACCENT_AMBER, ACCENT_VIOLET];
 type Tone = "default" | "error" | "warning" | "success" | "info";
 
+const ICON_FOR: [RegExp, React.ReactNode][] = [
+  [/client/i, <BusinessIcon key="c" />], [/sales/i, <HandshakeIcon key="s" />], [/invoiced/i, <ReceiptIcon key="i" />], [/collected/i, <PaymentsIcon key="p" />],
+  [/outstanding|overdue/i, <HourglassIcon key="o" />], [/bill/i, <ReceiptIcon key="b" />], [/advance/i, <SavingsIcon key="a" />],
+  [/expir|renew/i, <EventIcon key="e" />], [/licen/i, <VerifiedIcon key="l" />],
+];
+
 function Stat({ label, value, note, href, tone = "default" }: { label: string; value: string; note: string; href?: string; tone?: Tone }) {
-  const color = tone === "default" ? "text.primary" : `${tone}.main`;
-  const body = (
-    <CardContent>
-      <Typography variant="body2" color="text.secondary">{label}</Typography>
-      <Typography variant="h5" component="div" sx={{ fontWeight: 700, color, my: 0.5 }}>{value}</Typography>
-      <Typography variant="caption" color="text.secondary">{note}</Typography>
-    </CardContent>
+  const card = (
+    <StatCard
+      value={value}
+      label={label}
+      subtitle={note}
+      icon={ICON_FOR.find(([re]) => re.test(label))?.[1] ?? <SavingsIcon />}
+      accentColor={ACCENTS[(label.length + value.length) % ACCENTS.length]}
+      valueColor={tone === "default" ? undefined : `${tone}.main`}
+    />
   );
-  return (
-    <Card sx={{ height: "100%", ...(href ? { "&:hover": { borderColor: "primary.main" } } : {}) }}>
-      {href ? <Box component={Link} href={href} sx={{ display: "block", color: "inherit", textDecoration: "none", height: "100%" }}>{body}</Box> : body}
-    </Card>
-  );
+  return href ? <Box component={Link} href={href} sx={{ display: "block", color: "inherit", textDecoration: "none", height: "100%" }}>{card}</Box> : card;
 }
 
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {

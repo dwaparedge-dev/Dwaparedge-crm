@@ -1,11 +1,10 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
-import CardContent from "@mui/material/CardContent";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -16,19 +15,25 @@ import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import Skeleton from "@mui/material/Skeleton";
+import { LicenseFormDialog } from "./LicenseFormDialog";
 import { OptionLabel } from "@/features/options/components/OptionSelect";
 import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { format, parseISO } from "date-fns";
 import { useNotify } from "@/components/common/Notify";
-import { PageHeader } from "@/components/common/PageHeader";
+import { InfoBox, SectionLabel } from "@/components/common/InfoBox";
+import { DetailTabPanel, DetailViewHeroSidebar, DetailViewLayout, DetailViewMetricStrip, DetailViewTabs, MasterStatusBadge } from "@/components/shared/DetailView";
+import InfoIcon from "@mui/icons-material/InfoOutlined";
+import HistoryIcon from "@mui/icons-material/HistoryOutlined";
+import VerifiedIcon from "@mui/icons-material/VerifiedOutlined";
+import EditIcon from "@mui/icons-material/EditOutlined";
 import { ErrorState } from "@/components/common/states";
+import { HeroActions } from "@/components/common/HeroActions";
 import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 import { suggestRenewalExpiry } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import type { LicenseEventRow, LicenseRow } from "../service";
-import { DaysRemaining, LicenseStatusChip } from "./common";
+import { DaysRemaining } from "./common";
 
 type Detail = LicenseRow & { events: LicenseEventRow[] };
 type ActionName = "activate" | "renew" | "suspend" | "reinstate" | "revoke";
@@ -98,15 +103,6 @@ function ActionDialog({ license, action, onClose, onDone }: { license: Detail; a
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" component="div" sx={{ whiteSpace: "pre-line" }}>{children || "—"}</Typography>
-    </Box>
-  );
-}
-
 function describe(e: LicenseEventRow): string | null {
   const d = e.details ?? {};
   if (e.event_type === "renewed") return `Expiry ${d.oldExpiry} → ${d.newExpiry}${d.renewalPrice ? ` · renewal price ${formatMoney(String(d.renewalPrice))}` : ""}`;
@@ -115,77 +111,115 @@ function describe(e: LicenseEventRow): string | null {
 }
 
 export function LicenseDetail({ id }: { id: string }) {
+  const router = useRouter();
   const { data: l, error, loading, reload } = useFetch<Detail>(`/api/licenses/${id}`);
   const [action, setAction] = useState<ActionName | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
   if (loading || !l) return <><Skeleton width={300} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
 
   const s = l.stored_status;
   const canRenew = s === "active"; // includes expired (active past its date)
+  const days = l.days_remaining;
+  const tabs = [
+    { key: "overview", label: "Overview", icon: <InfoIcon sx={{ fontSize: 18 }} /> },
+    { key: "history", label: "History", icon: <HistoryIcon sx={{ fontSize: 18 }} />, count: l.events.length || undefined },
+  ];
+  const badgeKey = { pending: "pending", active: "active", expired: "warning", suspended: "maintenance", revoked: "inactive" }[l.status] ?? "info";
   return (
     <>
-      <PageHeader
-        title={<><Box component="span" sx={{ fontFamily: "monospace" }}>{l.license_identifier}</Box> <LicenseStatusChip status={l.status} /></>}
-        crumbs={[{ label: "Dashboard", href: "/" }, { label: "Software Licenses", href: "/licenses" }, { label: l.license_identifier }]}
-        actions={
-          <>
-            {s !== "revoked" && <Button component={Link} href={`/licenses/${id}/edit`} variant="outlined">Edit</Button>}
-            {s === "pending" && <Button variant="contained" onClick={() => setAction("activate")}>Activate</Button>}
-            {canRenew && <Button variant="contained" onClick={() => setAction("renew")}>Renew</Button>}
-            {s === "suspended" && <Button variant="contained" onClick={() => setAction("reinstate")}>Reinstate</Button>}
-            {s === "active" && <Button color="warning" variant="outlined" onClick={() => setAction("suspend")}>Suspend</Button>}
-            {s !== "revoked" && <Button color="error" variant="outlined" onClick={() => setAction("revoke")}>Revoke</Button>}
-          </>
+      <DetailViewLayout
+        onBack={() => router.push("/licenses")}
+        backLabel="Back to Licenses"
+        sidebar={
+          <DetailViewHeroSidebar
+            onBack={() => router.push("/licenses")}
+            backLabel="Back to Licenses"
+            title={l.license_identifier}
+            titleLabel="License identifier"
+            subtitle={l.product_name}
+            subtitleLabel="Product"
+            copyValue={l.license_identifier}
+            avatarIcon={<VerifiedIcon sx={{ fontSize: 32 }} />}
+            badges={<MasterStatusBadge status={badgeKey} customLabel={l.status.charAt(0).toUpperCase() + l.status.slice(1)} />}
+            attributes={[
+              { label: "Client", value: <Link href={`/clients/${l.client_id}`}>{l.client_name}</Link> },
+              { label: "Plan", value: <OptionLabel table="licenses" column="plan" value={l.plan} /> },
+              { label: "Seat limit", value: l.seat_limit ?? "Unlimited" },
+              { label: "Start date", value: format(parseISO(l.start_date), "dd MMM yyyy") },
+              { label: "Expiry date", value: format(parseISO(l.expiry_date), "dd MMM yyyy") },
+              { label: "Activated", value: l.activated_at ? format(new Date(l.activated_at), "dd MMM yyyy") : "—" },
+            ]}
+            actions={
+              <HeroActions>
+                {s === "pending" && <Button fullWidth variant="contained" onClick={() => setAction("activate")}>Activate</Button>}
+                {canRenew && <Button fullWidth variant="contained" onClick={() => setAction("renew")}>Renew</Button>}
+                {s === "suspended" && <Button fullWidth variant="contained" onClick={() => setAction("reinstate")}>Reinstate</Button>}
+                {s !== "revoked" && <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit license</Button>}
+                {s === "active" && <Button fullWidth variant="outlined" color="warning" onClick={() => setAction("suspend")}>Suspend</Button>}
+                {s !== "revoked" && <Button fullWidth variant="outlined" color="error" onClick={() => setAction("revoke")}>Revoke</Button>}
+              </HeroActions>
+            }
+          />
         }
-      />
-      {l.status === "expired" && <Alert severity="warning" sx={{ mb: 2 }}>This license expired on {format(parseISO(l.expiry_date), "dd MMM yyyy")}. Renew it to make it active again.</Alert>}
-      {l.status === "pending" && <Alert severity="info" sx={{ mb: 2 }}>This license has been issued but is not active yet.</Alert>}
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, lg: 7 }}>
-          <Card>
-            <CardContent>
-              <Grid container spacing={3}>
-                <Grid size={{ xs: 12, md: 6 }}><Field label="Client"><Link href={`/clients/${l.client_id}`}>{l.client_name}</Link></Field></Grid>
-                <Grid size={{ xs: 12, md: 6 }}><Field label="Product">{l.product_name}</Field></Grid>
-                <Grid size={{ xs: 6, md: 4 }}><Field label="Plan"><OptionLabel table="licenses" column="plan" value={l.plan} /></Field></Grid>
-                <Grid size={{ xs: 6, md: 4 }}><Field label="Seat limit">{l.seat_limit ?? "Unlimited"}</Field></Grid>
-                <Grid size={{ xs: 12, md: 4 }}><Field label="Days remaining"><DaysRemaining expiry={l.expiry_date} status={l.status} /></Field></Grid>
-                <Grid size={{ xs: 6, md: 4 }}><Field label="Start date">{format(parseISO(l.start_date), "dd MMM yyyy")}</Field></Grid>
-                <Grid size={{ xs: 6, md: 4 }}><Field label="Expiry date">{format(parseISO(l.expiry_date), "dd MMM yyyy")}</Field></Grid>
-                <Grid size={{ xs: 12, md: 4 }}><Field label="Activated">{l.activated_at ? format(new Date(l.activated_at), "dd MMM yyyy") : null}</Field></Grid>
-                <Grid size={{ xs: 6, md: 4 }}><Field label="Renewal price">{l.renewal_price ? formatMoney(l.renewal_price) : null}</Field></Grid>
-                <Grid size={{ xs: 12, md: 8 }}><Field label="Renewal terms">{l.renewal_terms}</Field></Grid>
-                <Grid size={12}><Field label="Notes">{l.notes}</Field></Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, lg: 5 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>History</Typography>
-              <List disablePadding>
-                {l.events.map((e) => (
-                  <ListItem key={e.id} divider disableGutters alignItems="flex-start">
-                    <ListItemText
-                      primary={EVENT_LABEL[e.event_type] ?? e.event_type}
-                      secondary={
-                        <>
-                          {[describe(e), e.note && `“${e.note}”`].filter(Boolean).map((t) => <Box key={t} component="span" sx={{ display: "block" }}>{t}</Box>)}
-                          <Box component="span" sx={{ display: "block" }}>{e.actor_name ?? "System"} · {format(new Date(e.created_at), "dd MMM yyyy, hh:mm a")}</Box>
-                        </>
-                      }
-                      slotProps={{ primary: { sx: { fontWeight: 600 } }, secondary: { component: "div" } }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+        metricStrip={
+          <DetailViewMetricStrip
+            columns={4}
+            metrics={[
+              { label: "Days remaining", value: <DaysRemaining expiry={l.expiry_date} status={l.status} />, subtitle: `expires ${format(parseISO(l.expiry_date), "dd MMM yyyy")}`, color: l.status === "expired" ? "#ef4444" : days <= 30 && l.status === "active" ? "#f59e0b" : undefined },
+              { label: "Renewal price", value: l.renewal_price ? formatMoney(l.renewal_price) : "—", subtitle: "projected on renewal" },
+              { label: "Seats", value: l.seat_limit ?? "Unlimited", subtitle: "user limit" },
+              { label: "Status", value: l.status.charAt(0).toUpperCase() + l.status.slice(1), subtitle: "current state" },
+            ]}
+          />
+        }
+      >
+        {l.status === "expired" && <Alert severity="warning" sx={{ mb: 2 }}>This license expired on {format(parseISO(l.expiry_date), "dd MMM yyyy")}. Renew it to make it active again.</Alert>}
+        {l.status === "pending" && <Alert severity="info" sx={{ mb: 2 }}>This license has been issued but is not active yet.</Alert>}
+        <DetailViewTabs tabs={tabs} activeTab={tab} onChange={setTab}>
+          <DetailTabPanel value={tab} index={0}>
+            <SectionLabel>License</SectionLabel>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Client"><Link href={`/clients/${l.client_id}`}>{l.client_name}</Link></InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Product">{l.product_name}</InfoBox></Grid>
+              <Grid size={{ xs: 6, md: 4 }}><InfoBox label="Plan"><OptionLabel table="licenses" column="plan" value={l.plan} /></InfoBox></Grid>
+              <Grid size={{ xs: 6, md: 4 }}><InfoBox label="Seat limit">{l.seat_limit ?? "Unlimited"}</InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Days remaining"><DaysRemaining expiry={l.expiry_date} status={l.status} /></InfoBox></Grid>
+              <Grid size={{ xs: 6, md: 4 }}><InfoBox label="Start date">{format(parseISO(l.start_date), "dd MMM yyyy")}</InfoBox></Grid>
+              <Grid size={{ xs: 6, md: 4 }}><InfoBox label="Expiry date">{format(parseISO(l.expiry_date), "dd MMM yyyy")}</InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Activated">{l.activated_at ? format(new Date(l.activated_at), "dd MMM yyyy") : null}</InfoBox></Grid>
+            </Grid>
+            <SectionLabel>Renewal</SectionLabel>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Renewal price">{l.renewal_price ? formatMoney(l.renewal_price) : null}</InfoBox></Grid>
+              <Grid size={{ xs: 12, md: 8 }}><InfoBox label="Renewal terms">{l.renewal_terms}</InfoBox></Grid>
+              <Grid size={12}><InfoBox label="Notes">{l.notes}</InfoBox></Grid>
+            </Grid>
+          </DetailTabPanel>
+          <DetailTabPanel value={tab} index={1}>
+            <List disablePadding>
+              {l.events.map((e) => (
+                <ListItem key={e.id} divider disableGutters alignItems="flex-start">
+                  <ListItemText
+                    primary={EVENT_LABEL[e.event_type] ?? e.event_type}
+                    secondary={
+                      <>
+                        {[describe(e), e.note && `“${e.note}”`].filter(Boolean).map((t) => <Box key={t} component="span" sx={{ display: "block" }}>{t}</Box>)}
+                        <Box component="span" sx={{ display: "block" }}>{e.actor_name ?? "System"} · {format(new Date(e.created_at), "dd MMM yyyy, hh:mm a")}</Box>
+                      </>
+                    }
+                    slotProps={{ primary: { sx: { fontWeight: 600 } }, secondary: { component: "div" } }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </DetailTabPanel>
+        </DetailViewTabs>
+      </DetailViewLayout>
       {action && <ActionDialog license={l} action={action} onClose={() => setAction(null)} onDone={() => { setAction(null); reload(); }} />}
+      {editing && <LicenseFormDialog licenseId={id} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
     </>
   );
 }

@@ -1,15 +1,13 @@
 "use client";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Grid from "@mui/material/Grid";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import { FormShell } from "@/components/common/FormShell";
 import { ClientPicker } from "@/components/common/ClientPicker";
 import { OptionSelect } from "@/features/options/components/OptionSelect";
 import { useFetch } from "@/components/common/useFetch";
@@ -33,6 +31,7 @@ export const emptyLicense = (clientId = ""): LicenseFormValues => ({
 });
 
 interface Props {
+  open: boolean;
   initial: LicenseFormValues;
   licenseId?: string;
   /** Issued licenses keep their client, product and dates (dates change through Renew). */
@@ -42,7 +41,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export function LicenseForm({ initial, licenseId, lockIdentity, lockDates, onSaved, onCancel }: Props) {
+export function LicenseForm({ open, initial, licenseId, lockIdentity, lockDates, onSaved, onCancel }: Props) {
   const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = useForm<LicenseFormValues>({ defaultValues: initial });
   const products = useFetch<{ items: ProductRow[] }>("/api/products?pageSize=100");
   const [formError, setFormError] = useState<string | null>(null);
@@ -70,8 +69,8 @@ export function LicenseForm({ initial, licenseId, lockIdentity, lockDates, onSav
   const f = (n: keyof LicenseFormValues) => ({ error: Boolean(errors[n]), helperText: errors[n]?.message as string | undefined });
 
   return (
-    <Box component="form" noValidate onSubmit={handleSubmit(submit)}>
-      {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
+    <FormShell open={open} title={licenseId ? "Edit license" : "Issue license"} onClose={onCancel} onSubmit={handleSubmit(submit)}
+      submitting={isSubmitting} submitLabel={licenseId ? "Save changes" : "Issue license"} error={formError}>
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>License</Typography>
@@ -108,7 +107,7 @@ export function LicenseForm({ initial, licenseId, lockIdentity, lockDates, onSav
           </Grid>
         </CardContent>
       </Card>
-      <Card sx={{ mb: 3 }}>
+      <Card>
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>Renewal</Typography>
           <Grid container spacing={2}>
@@ -122,10 +121,6 @@ export function LicenseForm({ initial, licenseId, lockIdentity, lockDates, onSav
           </Grid>
         </CardContent>
       </Card>
-      <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
-        <Button onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
-        <Button type="submit" variant="contained" disabled={isSubmitting}>{isSubmitting ? "Saving…" : licenseId ? "Save changes" : "Issue license"}</Button>
-      </Box>
-    </Box>
+    </FormShell>
   );
 }
