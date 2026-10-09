@@ -35,5 +35,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth/login).*)"],
+  // The manifest and app icons must load before sign-in, or the browser cannot install the app.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icon-.*\\.png|apple-touch-icon\\.png|api/auth/login).*)"],
 };

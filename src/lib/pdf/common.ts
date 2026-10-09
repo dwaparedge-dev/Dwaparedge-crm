@@ -12,7 +12,7 @@ export const dmy = (iso: string | null | undefined) => {
 };
 
 export function newDoc(title: string) {
-  return new PDFDocument({ size: "A4", margin: 36, info: { Title: title, Producer: "DwaparEdge Business Hub" }, bufferPages: true });
+  return new PDFDocument({ size: "A4", margin: 36, info: { Title: title, Producer: "DwaparEdge CRM" }, bufferPages: true });
 }
 
 export function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {

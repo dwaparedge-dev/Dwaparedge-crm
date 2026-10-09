@@ -161,7 +161,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
             {!isDesktop && <IconButton aria-label="Open navigation" onClick={() => setMobileOpen(true)}><MenuIcon /></IconButton>}
-            <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }} noWrap>Business Hub</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }} noWrap>DwaparEdge CRM</Typography>
           </Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, md: 1.5 } }}>
             <Box sx={{ display: { xs: "none", sm: "block" } }}><PageSearch onNavigate={(href) => router.push(href)} /></Box>

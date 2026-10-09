@@ -1,4 +1,4 @@
-# DwaparEdge Business Hub
+# DwaparEdge CRM
 
 Internal web app for Dwapar Edge Private Limited to manage **clients, sales, software licenses, GST invoices and payments**. Staff only; there is no customer portal.
 
