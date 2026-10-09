@@ -1,4 +1,5 @@
 "use client";
+import { selectLoading } from "@/components/common/loading";
 import { useState } from "react";
 import { Controller, useForm, useWatch, type UseFormReturn } from "react-hook-form";
 import Card from "@mui/material/Card";
@@ -97,7 +98,7 @@ export function SaleForm({ open, initial, saleId, lockClient, onSaved, onCancel 
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <Controller name="ownerId" control={control} render={({ field }) => (
-                <TextField select label="Owner" fullWidth {...field} disabled={owners.loading}>
+                <TextField select label="Owner" fullWidth {...field} disabled={owners.loading} slotProps={selectLoading(owners.loading)}>
                   <MenuItem value=""><em>Unassigned</em></MenuItem>
                   {owners.data?.items.map((u) => <MenuItem key={u.id} value={u.id}>{u.name}</MenuItem>)}
                 </TextField>

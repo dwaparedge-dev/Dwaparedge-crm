@@ -1,4 +1,5 @@
 "use client";
+import { autocompleteLoading } from "@/components/common/loading";
 import { useMemo } from "react";
 import { useFieldArray, useWatch, type UseFormReturn } from "react-hook-form";
 import Alert from "@mui/material/Alert";
@@ -93,7 +94,7 @@ export function LineItemsEditor({ form, initialItems, totalLabel, footnote }: Pr
                   getOptionLabel={(p) => p.name}
                   defaultValue={products.data?.items.find((p) => p.id === initialItems[idx]?.productId) ?? null}
                   onChange={(_, p) => pickProduct(idx, p)}
-                  renderInput={(params) => <TextField {...params} label="Catalog item (optional)" />}
+                  renderInput={(params) => <TextField {...params} slotProps={autocompleteLoading(params, products.loading)} label="Catalog item (optional)" />}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>

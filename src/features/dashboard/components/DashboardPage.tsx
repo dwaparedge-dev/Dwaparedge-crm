@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -9,7 +10,6 @@ import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import LinearProgress from "@mui/material/LinearProgress";
 import MenuItem from "@mui/material/MenuItem";
-import Skeleton from "@mui/material/Skeleton";
 import Tab from "@mui/material/Tab";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -29,6 +29,7 @@ import ChartCard from "@/components/shared/ChartCard";
 import BaseChart from "@/components/shared/charts/BaseChart";
 import CommonLineAreaChart from "@/components/shared/charts/CommonLineAreaChart";
 import CommonPieChart from "@/components/shared/charts/CommonPieChart";
+import { DashboardBodySkeleton } from "@/components/common/PageSkeletons";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
@@ -111,8 +112,14 @@ function StatLine({ label, value, strong }: { label: string; value: React.ReactN
 
 const Empty = ({ children }: { children: React.ReactNode }) => <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>{children}</Typography>;
 
+/** A table row that opens a record (a real <a> cannot sit directly inside <tbody>). */
 function LinkRow({ href, children }: { href: string; children: React.ReactNode }) {
-  return <TableRow hover component={Link} href={href} sx={{ display: "table-row", color: "inherit", textDecoration: "none" }}>{children}</TableRow>;
+  const router = useRouter();
+  return (
+    <TableRow hover tabIndex={0} role="link" onClick={() => router.push(href)} onKeyDown={(e) => { if (e.key === "Enter") router.push(href); }} sx={{ cursor: "pointer" }}>
+      {children}
+    </TableRow>
+  );
 }
 
 const STATUS_COLOR: Record<string, string> = { draft: GREY, confirmed: CYAN, completed: GREEN };
@@ -193,7 +200,7 @@ export function DashboardPage() {
       </Box>
 
       {error ? <ErrorState message={error} onRetry={reload} /> : !d || !calc ? (
-        <Grid container spacing={2}>{Array.from({ length: 6 }, (_, i) => <Grid key={i} size={{ xs: 12, sm: 6, lg: 2 }}><Skeleton variant="rounded" height={104} /></Grid>)}</Grid>
+        <DashboardBodySkeleton />
       ) : (
         <Box sx={{ opacity: loading ? 0.6 : 1, display: "grid", gap: 2, pb: 3 }}>
           {/* KPI strip */}
@@ -217,7 +224,7 @@ export function DashboardPage() {
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, lg: 8 }}>
               <ChartCard title="Revenue & collections" subtitle="Last six months to the end of the period" height={352}>
-                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1, mb: 0.5 }}>
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", sm: "repeat(4, 1fr)" }, gap: 1, mb: 0.5 }}>
                   {[
                     ["Invoiced (6 mo)", compactInr(calc.trend6.invoiced)],
                     ["Collected (6 mo)", compactInr(calc.trend6.collected)],
@@ -258,7 +265,7 @@ export function DashboardPage() {
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, lg: 6 }}>
               <ChartCard title="Receivables ageing" subtitle={`${formatMoney(d.billing.outstanding.amount)} unpaid, by days past due`} action={viewAll("/invoices")} noPadding height="100%">
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>Bucket</TableCell><TableCell className="num">Invoices</TableCell><TableCell className="num">Amount</TableCell><TableCell>Share</TableCell></TableRow></TableHead>
                   <TableBody>
                     {d.aging.map((b, i) => (
@@ -274,13 +281,13 @@ export function DashboardPage() {
                       <TableCell className="num">{formatMoney(calc.agingTotal.toFixed(2))}</TableCell><TableCell />
                     </TableRow>
                   </TableBody>
-                </Table>
+                </Table></Box>
               </ChartCard>
             </Grid>
             <Grid size={{ xs: 12, lg: 6 }}>
               <ChartCard title="Top outstanding clients" subtitle="Largest unpaid balances" action={viewAll("/clients")} noPadding height="100%">
                 {d.topDebtors.length === 0 ? <Empty>No client owes anything.</Empty> : (
-                  <Table size="small" sx={tableSx}>
+                  <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                     <TableHead><TableRow><TableCell>Client</TableCell><TableCell className="num">Invoices</TableCell><TableCell className="num">Balance</TableCell><TableCell className="num">Overdue</TableCell><TableCell className="num">Oldest</TableCell></TableRow></TableHead>
                     <TableBody>
                       {d.topDebtors.map((c) => (
@@ -293,7 +300,7 @@ export function DashboardPage() {
                         </LinkRow>
                       ))}
                     </TableBody>
-                  </Table>
+                  </Table></Box>
                 )}
               </ChartCard>
             </Grid>
@@ -313,7 +320,7 @@ export function DashboardPage() {
             </Grid>
             <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <ChartCard title="Sales pipeline" subtitle="Order value by stage" action={viewAll("/sales")} noPadding height="100%">
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>Stage</TableCell><TableCell className="num">Sales</TableCell><TableCell className="num">Value</TableCell><TableCell>Share</TableCell></TableRow></TableHead>
                   <TableBody>
                     {(["draft", "confirmed", "completed"] as const).map((st) => {
@@ -331,7 +338,7 @@ export function DashboardPage() {
                       <TableCell>Total</TableCell><TableCell className="num">{d.pipeline.reduce((a, b) => a + b.count, 0)}</TableCell><TableCell className="num">{compactInr(calc.pipeTotal)}</TableCell><TableCell />
                     </TableRow>
                   </TableBody>
-                </Table>
+                </Table></Box>
                 <Box sx={{ px: 2, py: 1.5 }}>
                   <Typography variant="caption" color="text.secondary">Still to bill on confirmed sales: </Typography>
                   <Typography variant="caption" sx={{ fontWeight: 700 }}>{formatMoney(d.sales.toBill)}</Typography>
@@ -350,15 +357,15 @@ export function DashboardPage() {
 
           {/* Tabbed activity tables */}
           <Card sx={{ borderRadius: "16px", overflow: "hidden" }}>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: 1, borderColor: "divider", pr: 2 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: 1, borderColor: "divider", pr: { xs: 0, sm: 2 } }}>
               <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ px: 1 }}>
                 {tabs.map((t) => <Tab key={t.label} label={`${t.label} (${t.count})`} sx={{ minHeight: 46, fontSize: "0.8125rem" }} />)}
               </Tabs>
-              {tabs[tab]?.href && viewAll(tabs[tab].href)}
+              {tabs[tab]?.href && <Box sx={{ display: { xs: "none", sm: "block" } }}>{viewAll(tabs[tab].href)}</Box>}
             </Box>
-            <Box sx={{ minHeight: 280 }}>
+            <Box sx={{ minHeight: 280, overflowX: "auto" }}>
               {tab === 0 && (d.recentInvoices.length === 0 ? <Empty>No invoices yet.</Empty> : (
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>Invoice</TableCell><TableCell>Client</TableCell><TableCell>Date</TableCell><TableCell>Status</TableCell><TableCell className="num">Amount</TableCell></TableRow></TableHead>
                   <TableBody>
                     {d.recentInvoices.map((i) => (
@@ -371,10 +378,10 @@ export function DashboardPage() {
                       </LinkRow>
                     ))}
                   </TableBody>
-                </Table>
+                </Table></Box>
               ))}
               {tab === 1 && (d.recentPayments.length === 0 ? <Empty>No payments recorded yet.</Empty> : (
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>Receipt</TableCell><TableCell>Client</TableCell><TableCell>Date</TableCell><TableCell>Method</TableCell><TableCell className="num">Amount</TableCell></TableRow></TableHead>
                   <TableBody>
                     {d.recentPayments.map((p) => (
@@ -385,10 +392,10 @@ export function DashboardPage() {
                       </LinkRow>
                     ))}
                   </TableBody>
-                </Table>
+                </Table></Box>
               ))}
               {tab === 2 && (d.upcomingDues.length === 0 ? <Empty>Nothing falls due in the next two weeks.</Empty> : (
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>Invoice</TableCell><TableCell>Client</TableCell><TableCell>Due date</TableCell><TableCell>Due in</TableCell><TableCell className="num">Balance</TableCell></TableRow></TableHead>
                   <TableBody>
                     {d.upcomingDues.map((u) => (
@@ -400,10 +407,10 @@ export function DashboardPage() {
                       </LinkRow>
                     ))}
                   </TableBody>
-                </Table>
+                </Table></Box>
               ))}
               {tab === 3 && (d.expiringLicenses.length === 0 ? <Empty>No licences are due for renewal in the next 30 days.</Empty> : (
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>Licence</TableCell><TableCell>Client</TableCell><TableCell>Product</TableCell><TableCell>Expires</TableCell><TableCell>Status</TableCell><TableCell className="num">Renewal</TableCell></TableRow></TableHead>
                   <TableBody>
                     {d.expiringLicenses.map((l) => {
@@ -418,10 +425,10 @@ export function DashboardPage() {
                       );
                     })}
                   </TableBody>
-                </Table>
+                </Table></Box>
               ))}
               {tab === 4 && (d.recentActivity.length === 0 ? <Empty>Nothing has happened yet.</Empty> : (
-                <Table size="small" sx={tableSx}>
+                <Box sx={{ overflowX: "auto" }}><Table size="small" sx={tableSx}>
                   <TableHead><TableRow><TableCell>When</TableCell><TableCell>User</TableCell><TableCell>Activity</TableCell></TableRow></TableHead>
                   <TableBody>
                     {d.recentActivity.map((a) => (
@@ -432,7 +439,7 @@ export function DashboardPage() {
                       </TableRow>
                     ))}
                   </TableBody>
-                </Table>
+                </Table></Box>
               ))}
             </Box>
           </Card>

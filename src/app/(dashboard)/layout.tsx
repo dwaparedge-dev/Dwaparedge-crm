@@ -1,6 +1,5 @@
 import { Suspense } from "react";
-import Box from "@mui/material/Box";
-import CircularProgress from "@mui/material/CircularProgress";
+import { ShellSkeleton } from "@/components/common/PageSkeletons";
 import { AppShell } from "@/components/layout/AppShell";
 import { requireUserPage } from "@/lib/auth/current-user";
 
@@ -11,13 +10,7 @@ async function AuthedShell({ children }: { children: React.ReactNode }) {
 
 export default function DashboardLayout({ children }: LayoutProps<"/">) {
   return (
-    <Suspense
-      fallback={
-        <Box sx={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
-          <CircularProgress aria-label="Loading" />
-        </Box>
-      }
-    >
+    <Suspense fallback={<ShellSkeleton />}>
       <AuthedShell>{children}</AuthedShell>
     </Suspense>
   );

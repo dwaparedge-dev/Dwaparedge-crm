@@ -1,4 +1,5 @@
 "use client";
+import { DetailPageSkeleton } from "@/components/common/PageSkeletons";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,7 +10,6 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Grid from "@mui/material/Grid";
-import Skeleton from "@mui/material/Skeleton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -82,7 +82,8 @@ export function PaymentDetail({ id }: { id: string }) {
   const [dialog, setDialog] = useState<"allocate" | "void" | { reverse: AllocationRow } | null>(null);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (loading || !p) return <><Skeleton width={300} height={40} /><Skeleton variant="rounded" height={260} sx={{ mt: 2 }} /></>;
+  if (loading && !p) return <DetailPageSkeleton />;
+  if (!p) return null;
 
   const voided = p.voided_at !== null;
   const hasLive = p.allocations.some((a) => !a.reversed_at);

@@ -1,4 +1,5 @@
 "use client";
+import { DetailPageSkeleton } from "@/components/common/PageSkeletons";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,7 +15,6 @@ import Grid from "@mui/material/Grid";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
-import Skeleton from "@mui/material/Skeleton";
 import { LicenseFormDialog } from "./LicenseFormDialog";
 import { OptionLabel } from "@/features/options/components/OptionSelect";
 import TextField from "@mui/material/TextField";
@@ -118,7 +118,8 @@ export function LicenseDetail({ id }: { id: string }) {
   const [tab, setTab] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (loading || !l) return <><Skeleton width={300} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
+  if (loading && !l) return <DetailPageSkeleton />;
+  if (!l) return null;
 
   const s = l.stored_status;
   const canRenew = s === "active"; // includes expired (active past its date)

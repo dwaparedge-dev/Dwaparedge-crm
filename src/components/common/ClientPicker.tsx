@@ -1,4 +1,5 @@
 "use client";
+import { autocompleteLoading } from "@/components/common/loading";
 import { useEffect, useState } from "react";
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
@@ -65,7 +66,7 @@ export function ClientPicker({ value, onChange, disabled, error }: Props) {
           {o.gstin && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 12 }}>{o.gstin}</span>}
         </li>
       )}
-      renderInput={(params) => <TextField {...params} label="Client" required error={Boolean(error)} helperText={error} />}
+      renderInput={(params) => <TextField {...params} slotProps={autocompleteLoading(params, loading)} label="Client" required error={Boolean(error)} helperText={error} />}
     />
   );
 }

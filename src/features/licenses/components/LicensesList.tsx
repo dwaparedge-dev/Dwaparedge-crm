@@ -1,4 +1,5 @@
 "use client";
+import { selectLoading } from "@/components/common/loading";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -94,7 +95,7 @@ export function LicensesList({ clientId, openNew = false, newClientId }: { clien
       compact={Boolean(clientId)} onRefresh={reload} refreshing={loading}
       search={{ value: search, onChange: setSearch, placeholder: "Search identifier, client, product, plan", label: "Search licenses" }}
       filters={<>
-        <TextField select size="small" label="Product" value={productId} onChange={reset(setProductId)} sx={{ minWidth: 180 }}>
+        <TextField select size="small" label="Product" value={productId} onChange={reset(setProductId)} sx={{ minWidth: 180 }} slotProps={selectLoading(products.loading)}>
           <MenuItem value="">All products</MenuItem>
           {products.data?.items.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
         </TextField>

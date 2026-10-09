@@ -1,4 +1,5 @@
 "use client";
+import { selectLoading } from "@/components/common/loading";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import Card from "@mui/material/Card";
@@ -82,7 +83,7 @@ export function LicenseForm({ open, initial, licenseId, lockIdentity, lockDates,
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <Controller name="productId" control={control} rules={{ required: "Select a product" }} render={({ field }) => (
-                <TextField select label="Product" required fullWidth {...field} disabled={lockIdentity || products.loading} {...f("productId")}>
+                <TextField select label="Product" required fullWidth {...field} disabled={lockIdentity || products.loading} slotProps={selectLoading(products.loading)} {...f("productId")}>
                   {products.data?.items.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}{!p.is_active && " (inactive)"}</MenuItem>)}
                 </TextField>
               )} />

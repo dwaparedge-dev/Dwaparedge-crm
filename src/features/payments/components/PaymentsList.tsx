@@ -70,7 +70,7 @@ export function PaymentsList({ clientId, saleId, saleNumber, suggestedAmount, on
   const body = (
     <>
       {!scoped && data && data.total > 0 && (
-        <StatCards stats={[
+        <StatCards loading={!data} stats={[
           { label: "Payments in view", value: data.total, hint: "matching the current filters", icon: <PaymentsIcon /> },
           { label: "Collected", value: formatMoney(data.totals.collected), hint: "received, not voided", icon: <SavingsIcon /> },
           { label: "Advances", value: formatMoney(data.totals.unallocated), hint: "not yet allocated to invoices", icon: <HourglassIcon /> },

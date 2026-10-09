@@ -1,11 +1,11 @@
 "use client";
+import { DetailPageSkeleton } from "@/components/common/PageSkeletons";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Skeleton from "@mui/material/Skeleton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -56,7 +56,8 @@ export function InvoiceDetail({ id }: { id: string }) {
   const [tab, setTab] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (loading || !inv) return <><Skeleton width={300} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
+  if (loading && !inv) return <DetailPageSkeleton />;
+  if (!inv) return null;
 
   const snap = inv.client_snapshot;
   const isDraft = inv.status === "draft";
@@ -204,13 +205,6 @@ export function InvoiceDetail({ id }: { id: string }) {
               </TableBody>
             </Table>
           </TableContainer>
-          <Box sx={{ ml: "auto", mt: 2, maxWidth: 340 }}>
-            <Row label="Taxable value" value={formatMoney(inv.subtotal)} />
-            {inv.supply_type === "intra" ? <><Row label="CGST" value={formatMoney(inv.cgst_total)} /><Row label="SGST" value={formatMoney(inv.sgst_total)} /></> : <Row label="IGST" value={formatMoney(inv.igst_total)} />}
-            {Number(inv.round_off) !== 0 && <Row label="Round off" value={formatMoney(inv.round_off)} />}
-            <Row label="Grand total" value={formatMoney(inv.total)} strong />
-            {inv.status === "issued" && <><Row label="Paid (allocated payments)" value={formatMoney(inv.amount_paid)} /><Row label="Balance due" value={formatMoney(inv.balance_due)} strong /></>}
-          </Box>
             <Box sx={{ ml: "auto", mt: 2, maxWidth: 340 }}>
               <Row label="Taxable value" value={formatMoney(inv.subtotal)} />
               {inv.supply_type === "intra" ? <><Row label="CGST" value={formatMoney(inv.cgst_total)} /><Row label="SGST" value={formatMoney(inv.sgst_total)} /></> : <Row label="IGST" value={formatMoney(inv.igst_total)} />}

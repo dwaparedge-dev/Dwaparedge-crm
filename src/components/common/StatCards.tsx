@@ -19,7 +19,7 @@ export interface Stat {
 export function StatCards({ stats, loading }: { stats: Stat[]; loading?: boolean }) {
   const anySelected = stats.some((s) => s.selected);
   return (
-    <StatCardGrid columns={{ xs: 2, sm: 2, md: Math.min(stats.length, 4) }} gap={{ xs: 1.25, sm: 2, md: 2.5 }} sx={{ mb: 3 }}>
+    <StatCardGrid columns={{ xs: 2, sm: 2, md: Math.min(stats.length, 4) }} gap={{ xs: 1.25, sm: 2, md: 2.5 }} sx={{ mb: 3, "& > :last-child:nth-of-type(odd)": { gridColumn: { xs: "1 / -1", md: "auto" } } }}>
       {stats.map((s, i) => (
         <StatCard
           key={s.label} value={s.value} label={s.label} subtitle={s.hint} icon={s.icon ?? <span />} accentColor={ACCENTS[i % ACCENTS.length]}

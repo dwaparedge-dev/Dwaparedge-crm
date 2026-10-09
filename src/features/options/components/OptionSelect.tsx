@@ -1,4 +1,6 @@
 "use client";
+import { autocompleteLoading } from "@/components/common/loading";
+import { selectLoading } from "@/components/common/loading";
 import { useMemo, useState } from "react";
 import Autocomplete, { createFilterOptions } from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
@@ -29,7 +31,7 @@ interface Props {
 
 /** A dropdown whose list lives in field_options. Typing a name that doesn't exist offers "+ Add". */
 export function OptionSelect({ table, column, value, onChange, label, required, disabled, size, error, helperText }: Props) {
-  const { options, add, labelOf } = useOptions(table, column);
+  const { options, add, labelOf, loaded } = useOptions(table, column);
   const [busy, setBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const noun = optionField(table, column) ? OPTION_FIELDS[optionField(table, column)!].noun : "option";
@@ -63,7 +65,7 @@ export function OptionSelect({ table, column, value, onChange, label, required, 
       options={items}
       disabled={disabled || busy}
       size={size}
-      loading={busy}
+      loading={busy || !loaded}
       autoHighlight
       selectOnFocus
       handleHomeEndKeys
@@ -84,7 +86,7 @@ export function OptionSelect({ table, column, value, onChange, label, required, 
         return <li key={key} {...rest}>{o.isNew ? `+ Add “${o.label}”` : o.label}</li>;
       }}
       renderInput={(params) => (
-        <TextField {...params} label={label} required={required} error={Boolean(error || addError)} helperText={addError ?? error ?? helperText ?? `Type to search, or add a new ${noun}`} />
+        <TextField {...params} slotProps={autocompleteLoading(params, busy || !loaded)} label={label} required={required} error={Boolean(error || addError)} helperText={addError ?? error ?? helperText ?? `Type to search, or add a new ${noun}`} />
       )}
     />
   );
@@ -92,9 +94,9 @@ export function OptionSelect({ table, column, value, onChange, label, required, 
 
 /** Plain filter dropdown ("All" + the active options) for list pages. */
 export function OptionFilter({ table, column, value, onChange, label, minWidth = 160 }: { table: string; column: string; value: string; onChange: (key: string) => void; label: string; minWidth?: number }) {
-  const { options } = useOptions(table, column);
+  const { options, loaded } = useOptions(table, column);
   return (
-    <TextField select size="small" label={label} value={value} onChange={(e) => onChange(e.target.value)} sx={{ minWidth }}>
+    <TextField select size="small" label={label} value={value} onChange={(e) => onChange(e.target.value)} sx={{ minWidth }} slotProps={selectLoading(!loaded)}>
       <MenuItem value=""><em>All</em></MenuItem>
       {options.map((o) => <MenuItem key={o.id} value={o.option_key}>{o.option_value}</MenuItem>)}
     </TextField>

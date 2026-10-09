@@ -1,4 +1,5 @@
 "use client";
+import { autocompleteLoading } from "@/components/common/loading";
 import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Dialog from "@mui/material/Dialog";
@@ -29,14 +30,16 @@ export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose, onCre
   const [saleId, setSaleId] = useState(initialSale ?? "");
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<SaleRow[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
   const sale = useFetch<Detail>(saleId ? `/api/sales/${saleId}` : null);
 
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
+      setLoadingOptions(true);
       const qs = new URLSearchParams({ status: "confirmed", pageSize: "30", search });
       if (clientId) qs.set("clientId", clientId);
-      api<{ items: SaleRow[] }>(`/api/sales?${qs}`).then((d) => !cancelled && setOptions(d.items.filter((s) => Number(s.to_bill_taxable) > 0))).catch(() => !cancelled && setOptions([]));
+      api<{ items: SaleRow[] }>(`/api/sales?${qs}`).then((d) => !cancelled && setOptions(d.items.filter((s) => Number(s.to_bill_taxable) > 0))).catch(() => !cancelled && setOptions([])).finally(() => !cancelled && setLoadingOptions(false));
     }, 250);
     return () => { cancelled = true; clearTimeout(t); };
   }, [search, clientId]);
@@ -53,6 +56,7 @@ export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose, onCre
         <CardContent>
           <Autocomplete
             options={options}
+            loading={loadingOptions}
             value={options.find((o) => o.id === saleId) ?? (sale.data ?? null)}
             getOptionLabel={(s) => `${s.sale_number} · ${s.client_name} · ${s.title}`}
             isOptionEqualToValue={(a, b) => a.id === b.id}
@@ -62,7 +66,7 @@ export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose, onCre
             renderOption={(props, s) => (
               <li {...props} key={s.id}>{s.sale_number} · {s.client_name} · {s.title}<Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>{formatMoney(s.balance_remaining)} remaining</Typography></li>
             )}
-            renderInput={(params) => <TextField {...params} label="Sale to invoice" required helperText={options.length === 0 && !saleId ? "No confirmed sale with something left to bill" : undefined} />}
+            renderInput={(params) => <TextField {...params} slotProps={autocompleteLoading(params, loadingOptions)} label="Sale to invoice" required helperText={options.length === 0 && !saleId ? "No confirmed sale with something left to bill" : undefined} />}
           />
         </CardContent>
       </Card>

@@ -101,6 +101,11 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
                     alignItems: 'center',
                     gap: 1,
                     ml: 'auto',
+                    // Phones: search and buttons wrap onto their own lines instead of running off the card.
+                    flexWrap: 'wrap',
+                    justifyContent: 'flex-end',
+                    flex: { xs: '1 1 100%', sm: '0 1 auto' },
+                    minWidth: 0,
                 }}
             >
                 {effectiveRightContent}

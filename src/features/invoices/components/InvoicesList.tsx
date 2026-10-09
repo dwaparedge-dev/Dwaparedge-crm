@@ -101,7 +101,7 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
   const body = (
     <>
       {!scoped && data && data.total > 0 && (
-        <StatCards stats={[
+        <StatCards loading={!data} stats={[
           { label: "Invoices in view", value: data.total, hint: "matching the current filters", icon: <ReceiptLongIcon /> },
           { label: "Invoiced", value: formatMoney(data.totals.invoiced), hint: "issued invoices", icon: <PaymentsIcon /> },
           { label: "Outstanding", value: formatMoney(data.totals.outstanding), hint: "invoiced minus payments allocated", icon: <HourglassIcon /> },

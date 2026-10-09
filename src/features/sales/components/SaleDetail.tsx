@@ -1,10 +1,10 @@
 "use client";
+import { DetailPageSkeleton } from "@/components/common/PageSkeletons";
 import { useState } from "react";
 import Link from "next/link";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Skeleton from "@mui/material/Skeleton";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -59,7 +59,7 @@ export function SaleDetail({ id }: { id: string }) {
   const [invoicesKey, setInvoicesKey] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (loading && !s) return <><Skeleton width={260} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
+  if (loading && !s) return <DetailPageSkeleton />;
   if (!s) return null;
 
   const editable = s.status === "draft" || s.status === "confirmed";

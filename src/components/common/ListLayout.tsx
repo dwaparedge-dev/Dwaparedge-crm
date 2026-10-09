@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useMemo, useState } from "react";
+import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import FilterToolbar from "@/components/shared/FilterToolbar";
 import StandardSearchInput from "@/components/shared/StandardSearchInput";
@@ -37,7 +38,7 @@ export function ListLayout({ search, filters, tabs, actions, onRefresh, refreshi
       {!compact && <FilterToolbar leftFilters={filters} search={searchBox} sx={{ mb: 2.5 }} />}
       <Card sx={cardSx}>
         <TableToolbar
-          leftContent={tabs} rightContent={<>{compact && filters}{compact && searchBox}{actions}</>} onRefresh={onRefresh} isRefreshing={refreshing}
+          leftContent={tabs} rightContent={<>{compact && filters}{compact && <Box sx={{ flex: { xs: "1 1 100%", sm: "0 1 auto" }, minWidth: 0 }}>{searchBox}</Box>}{actions}</>} onRefresh={onRefresh} isRefreshing={refreshing}
           onCustomizeColumns={() => { const el = document.activeElement; if (el instanceof HTMLElement) openColumns?.(el); }}
         />
         {notice}

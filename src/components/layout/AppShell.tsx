@@ -155,7 +155,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
       <Box component="header" sx={{ position: "sticky", top: 0, zIndex: 1100, bgcolor: "background.default", px: { xs: 1.5, md: 3 }, pt: 2, pb: 2.5 }}>
         <Box
           sx={{
-            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, px: 2, py: 1, borderRadius: "14px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: { xs: 1, md: 2 }, px: { xs: 1, md: 2 }, py: 1, borderRadius: "14px",
             bgcolor: "rgb(255 255 255 / 0.85)", backdropFilter: "blur(10px)", border: "1px solid rgb(226 232 240 / 0.9)", boxShadow: "0 4px 12px rgb(15 23 42 / 0.08)",
           }}
         >
@@ -164,7 +164,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
             <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }} noWrap>Business Hub</Typography>
           </Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, md: 1.5 } }}>
-            <PageSearch onNavigate={(href) => router.push(href)} />
+            <Box sx={{ display: { xs: "none", sm: "block" } }}><PageSearch onNavigate={(href) => router.push(href)} /></Box>
             <Tooltip title="Notifications">
               <IconButton aria-label="Notifications" onClick={(e) => setBellAnchor(e.currentTarget)}><NotificationsIcon /></IconButton>
             </Tooltip>

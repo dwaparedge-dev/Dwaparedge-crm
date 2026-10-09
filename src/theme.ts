@@ -51,10 +51,18 @@ export const theme = createTheme({
     MuiPaper: { defaultProps: { elevation: 0 } },
     MuiAppBar: { styleOverrides: { root: { backgroundImage: "none" } } },
     MuiDrawer: { styleOverrides: { paper: { borderRight: "1px solid var(--mui-palette-divider)", boxShadow: "none" } } },
-    MuiDialog: { styleOverrides: { paper: { borderRadius: 8, boxShadow: "0 8px 24px 0 rgb(46 38 61 / 0.24)" } } },
-    MuiDialogTitle: { styleOverrides: { root: { fontSize: "1.125rem", fontWeight: 500, padding: "1.25rem 1.5rem" } } },
-    MuiDialogContent: { styleOverrides: { root: { padding: "0 1.5rem 1rem" } } },
-    MuiDialogActions: { styleOverrides: { root: { padding: "1rem 1.5rem 1.25rem" } } },
+    MuiDialog: {
+      styleOverrides: {
+        paper: ({ theme }) => ({
+          borderRadius: 8, boxShadow: "0 8px 24px 0 rgb(46 38 61 / 0.24)",
+          // Phones: nearly edge to edge, scrolling inside the dialog.
+          [theme.breakpoints.down("sm")]: { margin: 8, width: "calc(100% - 16px)", maxWidth: "calc(100% - 16px)", maxHeight: "calc(100% - 16px)" },
+        }),
+      },
+    },
+    MuiDialogTitle: { styleOverrides: { root: { fontSize: "1.125rem", fontWeight: 500, padding: "1.25rem 1.5rem", "@media (max-width:599.95px)": { padding: "1rem 1rem" } } } },
+    MuiDialogContent: { styleOverrides: { root: { padding: "0 1.5rem 1rem", "@media (max-width:599.95px)": { padding: "0 1rem 1rem" } } } },
+    MuiDialogActions: { styleOverrides: { root: { padding: "1rem 1.5rem 1.25rem", "@media (max-width:599.95px)": { padding: "0.75rem 1rem 1rem", flexWrap: "wrap" } } } },
     MuiTextField: { defaultProps: { variant: "outlined" } },
     MuiOutlinedInput: {
       styleOverrides: {
@@ -68,6 +76,8 @@ export const theme = createTheme({
     MuiChip: { styleOverrides: { root: { fontWeight: 500 } } },
     MuiTabs: { styleOverrides: { indicator: { height: 3, borderRadius: 3 } } },
     MuiTab: { styleOverrides: { root: { textTransform: "none", fontWeight: 500, minHeight: 44 } } },
+    // Wide data tables keep their layout on phones and scroll sideways inside their card.
+    MuiTableContainer: { styleOverrides: { root: ({ theme }) => ({ overflowX: "auto", WebkitOverflowScrolling: "touch", [theme.breakpoints.down("md")]: { "& > .MuiTable-root": { minWidth: 640 } } }) } },
     MuiTableCell: {
       styleOverrides: {
         root: { borderColor: "var(--mui-palette-divider)" },

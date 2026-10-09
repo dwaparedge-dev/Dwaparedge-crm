@@ -1,4 +1,5 @@
 "use client";
+import { selectLoading } from "@/components/common/loading";
 import { useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import Card from "@mui/material/Card";
@@ -177,7 +178,7 @@ export function ClientForm({ open, initial = EMPTY_CLIENT, clientId, onSaved, on
                 name="ownerId"
                 control={control}
                 render={({ field }) => (
-                  <TextField select label="Account owner" fullWidth {...field} disabled={owners.loading}>
+                  <TextField select label="Account owner" fullWidth {...field} disabled={owners.loading} slotProps={selectLoading(owners.loading)}>
                     <MenuItem value="">
                       <em>Unassigned</em>
                     </MenuItem>
