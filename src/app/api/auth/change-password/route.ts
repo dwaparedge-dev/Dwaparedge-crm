@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { assertSameOrigin, errorResponse, readJson } from "@/lib/http";
+import { assertSameOrigin, clientIp, errorResponse, readJson, userAgent } from "@/lib/http";
 import { requireUser } from "@/lib/auth/current-user";
 import { changePassword } from "@/lib/auth/login";
 import { setSessionCookie } from "@/lib/auth/session";
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     const user = await requireUser();
     const { currentPassword, newPassword } = body.parse(await readJson(request));
-    await setSessionCookie(await changePassword(user.id, currentPassword, newPassword));
+    await setSessionCookie(await changePassword(user.id, currentPassword, newPassword, { ip: clientIp(request), userAgent: userAgent(request) }));
     return NextResponse.json({ ok: true });
   } catch (error) {
     return errorResponse(error);

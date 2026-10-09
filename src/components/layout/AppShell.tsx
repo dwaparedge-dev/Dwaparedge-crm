@@ -31,6 +31,7 @@ import InvoicesIcon from "@mui/icons-material/ReceiptLongOutlined";
 import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import SettingsIcon from "@mui/icons-material/SettingsOutlined";
 import NotificationsIcon from "@mui/icons-material/NotificationsNoneOutlined";
+import { IdleSignOut } from "./IdleSignOut";
 import LockIcon from "@mui/icons-material/LockOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NAV_GROUPS, type NavItem } from "./nav";
@@ -223,6 +224,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
         </Box>
       </Box>
       {changingPassword && <ChangePasswordDialog onClose={() => setChangingPassword(false)} />}
+      <IdleSignOut />
     </Box>
   );
 }

@@ -6,6 +6,7 @@
  *   npm run users -- passwd  --email a@b.com        (resets the password and signs the user out everywhere)
  *   npm run users -- deactivate --email a@b.com     (blocks login and ends all sessions)
  *   npm run users -- activate   --email a@b.com
+ *   npm run users -- events     [--email a@b.com]   (recent sign-in and account-security events)
  *
  * Passwords are always typed at a hidden prompt, never passed on the command line or stored in shell history.
  */
@@ -83,8 +84,18 @@ async function run() {
         console.log(r.rowCount ? `User ${on ? "activated" : "deactivated"}.` : "No such user.");
         break;
       }
+      case "events": {
+        const { rows } = await pool.query(
+          `SELECT e.created_at, e.event, coalesce(u.email, e.email_hint) AS email, e.ip
+           FROM security_events e LEFT JOIN users u ON u.id = e.user_id
+           WHERE ($1::text IS NULL OR lower(coalesce(u.email, e.email_hint)) = lower($1)) ORDER BY e.created_at DESC LIMIT 50`,
+          [email ?? null],
+        );
+        console.table(rows.map((r) => ({ when: r.created_at.toISOString(), event: r.event, email: r.email, ip: r.ip })));
+        break;
+      }
       default:
-        console.log("Commands: list | create --email --name | passwd --email | deactivate --email | activate --email");
+        console.log("Commands: list | create --email --name | passwd --email | deactivate --email | activate --email | events [--email]");
         process.exitCode = command ? 1 : 0;
     }
   } finally {

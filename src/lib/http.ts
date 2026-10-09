@@ -35,9 +35,13 @@ export function assertSameOrigin(request: Request) {
   }
 }
 
+/** The caller's address. On Vercel the platform sets these headers itself; a client-supplied value is overwritten. */
 export function clientIp(request: Request): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const h = request.headers;
+  return h.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip")?.trim() || h.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 }
+
+export const userAgent = (request: Request) => (request.headers.get("user-agent") ?? "").slice(0, 300);
 
 /** Parses a JSON body, turning malformed JSON into a 400 instead of a 500. */
 export async function readJson(request: Request): Promise<unknown> {

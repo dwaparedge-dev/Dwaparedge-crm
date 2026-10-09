@@ -1,6 +1,6 @@
 'use client';
 /* Copied from FactoONE (Factoonemini/frontend) so both products share one look. Keep in sync rather than restyling here. */
-/* eslint-disable @typescript-eslint/no-explicit-any, react/display-name, react-hooks/set-state-in-effect */
+/* eslint-disable react/display-name, react-hooks/set-state-in-effect */
 
 import React, { useMemo, useState, useEffect } from 'react';
 import {

@@ -56,7 +56,7 @@ Requirements: Node 20.9+, a PostgreSQL database (a **separate** Supabase project
 ```bash
 npm install
 cp .env.example .env.local        # then edit it (see Environment variables)
-npm run db:migrate                # create the tables
+npm run db:sync                   # create / update the tables, triggers, views and default rows
 npm run db:seed-admin             # create the first login from SEED_ADMIN_*
 npm run dev                       # http://localhost:3000
 ```
@@ -91,7 +91,8 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `npm run check` | Type-check, lint and unit tests (run before committing) |
 | `npm run typecheck` · `lint` · `test` | The three checks separately |
 | `npm run test:db` | Database-backed integration tests (see [Testing](#testing)) |
-| `npm run db:migrate` | Apply new `db/migrations/*.sql` files, each in a transaction |
+| `npm run db:sync` | Build or update the database from `db/tables`, `db/logic`, `db/seeds` (also `-- --module=billing` / `-- --table=payments`); then locks the Supabase API roles out. Never drops anything. See [Database sync](#database-sync) |
+| `npm run db:migrate` | Apply new numbered `db/migrations/*.sql` (one-off drops, renames, data fixes), each in a transaction |
 | `npm run db:seed-admin` | Create the first user from `SEED_ADMIN_*` (no-op if the email exists) |
 | `npm run users -- <command>` | `list`, `create`, `passwd`, `deactivate`, `activate` (passwords typed at a hidden prompt) |
 
@@ -107,15 +108,32 @@ npm run users -- deactivate --email asha@example.com    # block login, end all s
 
 Users can change their own password from the account menu (top right).
 
+## Database sync
+
+The schema is declared as files, like FactoONE: one `db/tables/<module>/<table>.sql` per table, registered in `db/schema.ts` (parents before children). `npm run db:sync` runs them in order, so it works on an empty database and on an existing one:
+
+- missing tables are created (`CREATE TABLE IF NOT EXISTS`, plus indexes);
+- columns that a file declares but the table lacks are added (`ALTER TABLE … ADD COLUMN`) - so adding a column is just adding a line to its table file. A `NOT NULL` column with no default cannot be added to a table that has rows; give it a default;
+- `db/logic/*.sql` (triggers, views, functions) are re-applied; `db/seeds/*.sql` insert default rows without overwriting edits;
+- row level security is enforced afterwards (`db/hardening.sql`).
+
+To add a table: create the file, register it in `db/schema.ts`, run `npm run db:sync`. A unit test checks that every file is registered and ordered after the tables it references.
+
+A sync never drops or rewrites anything, so removing or renaming a column, changing a type or adding a constraint to an existing table goes in a numbered file in `db/migrations/` (`npm run db:migrate`) - and update the table file too.
+
 ## Deployment (Vercel)
 
 1. Push the repo and import it in Vercel (framework: Next.js; Node 20+).
-2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS`, `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT`. Use a **different** `JWT_SECRET` from local.
-3. Run migrations and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:migrate && npm run db:seed-admin`) or in CI before the first deploy. The build does not migrate automatically, on purpose.
+2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it). Use a **different** `JWT_SECRET` from local.
+3. Sync the schema and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:sync && npm run db:seed-admin`) or in CI before the first deploy. The build does not migrate automatically, on purpose.
 4. Pick the Vercel function region closest to your Supabase region (e.g. Supabase `ap-southeast-2` → Vercel `syd1`) to keep database round trips short.
 5. Each serverless instance keeps a small pool (3 connections on Vercel). If you scale up, watch the Supabase pooler's connection limit.
 
 There are **no scheduled jobs or background workers**, so no cron setup is needed. (Reminders are shown on the dashboard instead of emailed.) The app writes nothing to the local filesystem; PDFs are generated on demand from stored data.
+
+### Security
+
+See [docs/SECURITY.md](docs/SECURITY.md) for how access is controlled and the pre-launch checklist. `npm run db:sync` (and `db:migrate`) also runs `db/hardening.sql`, which locks the tables away from Supabase's public REST API.
 
 ### Database backups and recovery
 
@@ -136,14 +154,13 @@ There are **no scheduled jobs or background workers**, so no cron setup is neede
 - **Input:** Zod on every request body and query; all SQL is parameterized (sort columns come from allow-lists).
 - **Headers:** `nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, HSTS, referrer and permissions policies. A full script-src CSP needs per-request nonces with MUI/Emotion and is left out.
 - **Integrity in the database:** triggers make issued invoices, their items, payments and allocations immutable and block over-allocation even if application code is bypassed.
-- **Exports:** CSV cells that look like spreadsheet formulas are neutralised.
 - **Secrets:** none in the repo or the browser bundle. The database connection uses TLS but does not verify the server certificate (`rejectUnauthorized: false`, the common Supabase setup); supply the CA if you need verification.
 - **Dependencies:** `npm audit --omit=dev` reports no known vulnerabilities at the time of writing.
 
 ## Testing
 
 ```bash
-npm test         # fast unit tests (money, GST, allocation rules, validation, dates, CSV)
+npm test         # fast unit tests (money, GST, allocation rules, validation, dates, sign-in rules)
 npm run test:db  # integration tests against the real database engine
 ```
 
@@ -158,9 +175,13 @@ src/
   app/                 Next.js routes: (dashboard)/ pages, api/ route handlers, login/
   components/          layout shell, common UI (dialogs, tables states), forms
   features/<module>/   schema.ts (Zod) · service.ts (business logic + SQL) · components/
-  lib/                 db (pg pool, transactions), auth, money (BigInt), gst, pdf, csv, dates
+  lib/                 db (pg pool, transactions), auth, money (BigInt), gst, pdf, dates
   proxy.ts             optimistic auth redirect (not a security boundary)
-db/migrations/         numbered SQL files applied by scripts/migrate.ts
+db/schema.ts           registry of tables, logic and seed files (read by db/sync.ts)
+db/tables/<module>/    one CREATE TABLE file per table (the schema's current shape)
+db/logic/              functions, triggers and views (safe to re-run)
+db/seeds/              default rows
+db/migrations/         numbered one-off changes a sync cannot do (drops, renames, data fixes)
 scripts/               migrate, seed-admin, users
 tests/                 unit tests; tests/integration/ database-backed tests
 docs/                  API.md, DATA-MODEL.md

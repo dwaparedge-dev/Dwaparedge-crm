@@ -27,7 +27,7 @@ interface ListResponse {
   summary: { current: number; archived: number; newThisMonth: number; withSales: number };
 }
 
-export function StatusChip({ archived }: { archived?: boolean }) {
+function StatusChip({ archived }: { archived?: boolean }) {
   return archived ? <Chip size="small" label="Archived" /> : <Chip size="small" label="Active" color="success" variant="outlined" />;
 }
 

@@ -10,7 +10,6 @@ export const OPTION_FIELDS = {
 } as const;
 
 export type OptionFieldKey = keyof typeof OPTION_FIELDS;
-export const OPTION_FIELD_KEYS = Object.keys(OPTION_FIELDS) as OptionFieldKey[];
 
 export function optionField(table: string, column: string): OptionFieldKey | null {
   const k = `${table}.${column}`;

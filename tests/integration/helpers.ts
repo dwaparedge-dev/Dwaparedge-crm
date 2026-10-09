@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import pg from "pg";
 import { config } from "dotenv";
+import { syncSchema } from "../../db/sync";
 
 config({ path: ".env.local" });
 config();
@@ -13,7 +14,7 @@ export interface TestDb {
 }
 
 /**
- * Creates schema vt_<random>, applies every migration inside it and points the app's pool at it
+ * Creates schema vt_<random>, syncs the schema (db/tables, db/logic, db/seeds) and applies any migrations inside it and points the app's pool at it
  * (DB_SEARCH_PATH). Must be called before anything imports the app's db module.
  */
 export async function createTestDb(): Promise<TestDb> {
@@ -26,6 +27,7 @@ export async function createTestDb(): Promise<TestDb> {
   try {
     await admin.query(`CREATE SCHEMA ${schema}`);
     await admin.query(`SET search_path TO ${schema}`);
+    await syncSchema(admin);
     const dir = join(process.cwd(), "db", "migrations");
     for (const f of (await readdir(dir)).filter((x) => x.endsWith(".sql")).sort()) {
       await admin.query(await readFile(join(dir, f), "utf8"));

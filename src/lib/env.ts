@@ -6,7 +6,8 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   JWT_EXPIRES_IN_DAYS: z.coerce.number().int().positive().default(7),
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
-  RATE_LIMIT_SALT: z.string().min(8).default("dev-rate-limit-salt"),
+  // No fallback in production: a known salt would make the hashed login-attempt keys guessable.
+  RATE_LIMIT_SALT: process.env.NODE_ENV === "production" ? z.string().min(16, "RATE_LIMIT_SALT must be set (16+ characters)") : z.string().min(8).default("dev-rate-limit-salt"),
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
 });
 

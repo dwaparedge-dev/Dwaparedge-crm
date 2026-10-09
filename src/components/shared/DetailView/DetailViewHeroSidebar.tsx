@@ -418,6 +418,7 @@ export const DetailViewHeroSidebar: React.FC<DetailViewHeroSidebarProps> = ({
                                             sx={{
                                                 fontWeight: 800,
                                                 fontSize: '0.78rem',
+                                                '& a': { color: 'inherit', fontWeight: 'inherit', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
                                                 color: '#ffffff !important',
                                                 fontFamily: attr.isMonospace ? 'monospace' : 'inherit',
                                             }}
@@ -483,6 +484,7 @@ export const DetailViewHeroSidebar: React.FC<DetailViewHeroSidebarProps> = ({
                                     sx={{
                                         fontWeight: 800,
                                         fontSize: compact ? '0.8rem' : '0.875rem',
+                                        '& a': { color: 'inherit', fontWeight: 'inherit', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
                                         color: '#ffffff !important',
                                         fontFamily: attr.isMonospace ? 'monospace' : 'inherit',
                                         cursor: (typeof attr.value === 'string' && attr.value.length > 25) ? 'pointer' : 'default'

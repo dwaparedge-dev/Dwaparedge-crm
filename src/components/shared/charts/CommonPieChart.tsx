@@ -54,15 +54,16 @@ const CommonPieChart = ({
         return [];
     }, [labels, data]);
 
-    const defaultColors = [
+
+    const options: ApexOptions = useMemo(() => {
+        const defaultColors = [
         theme.palette.success.main,
         theme.palette.warning.main,
         theme.palette.error.main,
         theme.palette.info.main,
         theme.palette.primary.main,
-    ];
-
-    const options: ApexOptions = useMemo(() => ({
+        ];
+        return {
         labels: chartLabels,
         colors: colors ? [...colors] : defaultColors,
         stroke: { show: false },
@@ -102,7 +103,8 @@ const CommonPieChart = ({
             theme: theme.palette.mode,
             y: { formatter: valueFormatter },
         },
-    }), [theme, chartLabels, colors, legend, valueFormatter, defaultColors, compact]);
+        };
+    }, [theme, chartLabels, colors, legend, valueFormatter, compact]);
 
     const chartHeight = height ?? (compact ? 250 : "100%");
     const generatedId = useId();

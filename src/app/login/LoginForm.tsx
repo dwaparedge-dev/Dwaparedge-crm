@@ -31,6 +31,7 @@ export function LoginForm() {
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const idle = params.get("reason") === "idle";
   const {
     register,
     handleSubmit,
@@ -50,12 +51,16 @@ export function LoginForm() {
         setError(data?.error?.message ?? "Sign-in failed. Please try again.");
         return;
       }
-      const next = params.get("next");
-      router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
-      router.refresh();
+      goNext();
     } catch {
       setError("Network error. Please check your connection and try again.");
     }
+  }
+
+  function goNext() {
+    const next = params.get("next");
+    router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
+    router.refresh();
   }
 
   const features = [
@@ -112,6 +117,7 @@ export function LoginForm() {
         <Box sx={{ width: "100%", maxWidth: 420 }}>
           <Typography variant="h4" sx={{ fontWeight: 700, letterSpacing: "-0.02em", fontSize: { xs: "1.6rem", md: "2rem" } }}>Welcome back</Typography>
           <Typography color="text.secondary" sx={{ mt: 2, mb: 8 }}>Sign in with your staff account to continue.</Typography>
+          {idle && !error && <Alert severity="info" sx={{ mb: 5 }}>You were signed out after 30 minutes of inactivity.</Alert>}
           {error && <Alert severity="error" sx={{ mb: 5 }}>{error}</Alert>}
           <Box component="form" noValidate onSubmit={handleSubmit(onSubmit)} sx={{ display: "grid", gap: 5, "& .MuiOutlinedInput-root": { bgcolor: "#fff" }, "& input:-webkit-autofill": { WebkitBoxShadow: "0 0 0 100px #fff inset", WebkitTextFillColor: "inherit", caretColor: "inherit", borderRadius: "inherit" } }}>
             <TextField

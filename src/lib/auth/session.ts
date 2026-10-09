@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { getEnv } from "@/lib/env";
 
-export const SESSION_COOKIE = "de_session";
+import { SESSION_COOKIE } from "./cookie-name";
 
 export interface SessionPayload {
   userId: string;
@@ -53,3 +53,4 @@ export async function clearSessionCookie() {
 export async function readSession(): Promise<SessionPayload | null> {
   return verifySession((await cookies()).get(SESSION_COOKIE)?.value);
 }
+

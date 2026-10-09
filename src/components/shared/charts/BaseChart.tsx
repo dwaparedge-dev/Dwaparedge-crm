@@ -37,8 +37,6 @@ const BaseChart = ({
     height = '100%',
     isLoading = false,
     noData = false,
-    title,
-    subtitle,
     stacked = false
 }: BaseChartProps) => {
     const theme = useTheme();

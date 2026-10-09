@@ -1,6 +1,6 @@
 # Data model
 
-PostgreSQL, created by `db/migrations/*.sql`. UUID primary keys, `timestamptz` timestamps, money as `NUMERIC(14,2)`, quantities `NUMERIC(12,3)`, rates `NUMERIC(5,2)`. Business data is relational; the only JSON columns are the frozen party snapshots on issued invoices and free-form `metadata` on the activity log.
+PostgreSQL, declared in `db/tables/**/*.sql` (registered in `db/schema.ts`, built by `npm run db:sync`; triggers and views in `db/logic/`). UUID primary keys, `timestamptz` timestamps, money as `NUMERIC(14,2)`, quantities `NUMERIC(12,3)`, rates `NUMERIC(5,2)`. Business data is relational; the only JSON columns are the frozen party snapshots on issued invoices and free-form `metadata` on the activity log.
 
 ```
 users ──< clients ──< contacts

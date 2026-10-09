@@ -32,7 +32,9 @@ async function run() {
         throw new Error(`Migration ${file} failed: ${(e as Error).message}`);
       }
     }
-    console.log("migrations up to date");
+    // Lock the tables away from Supabase's public REST API (see db/hardening.sql); safe to repeat.
+    await client.query(await readFile(join(process.cwd(), "db", "hardening.sql"), "utf8"));
+    console.log("migrations up to date; API roles locked out");
   } finally {
     client.release();
     await pool.end();

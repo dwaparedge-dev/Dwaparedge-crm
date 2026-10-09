@@ -1,6 +1,6 @@
 'use client';
 /* Copied from FactoONE (Factoonemini/frontend) so both products share one look. Keep in sync rather than restyling here. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 import React from 'react';
 import { Box, Typography, useTheme, alpha, SxProps, Theme } from '@mui/material';

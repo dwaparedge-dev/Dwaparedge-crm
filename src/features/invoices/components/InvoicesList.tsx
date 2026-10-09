@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfOutlined";
+import DownloadIcon from "@mui/icons-material/DownloadOutlined";
+import DoneAllIcon from "@mui/icons-material/DoneAll";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 import { format } from "date-fns";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState } from "@/components/common/states";
@@ -34,6 +39,7 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
   const notify = useNotify();
   const [issuing, setIssuing] = useState<InvoiceRow | null>(null);
   const [issueBusy, setIssueBusy] = useState(false);
+  const [issuingAll, setIssuingAll] = useState(false);
   const scoped = Boolean(clientId || saleId);
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -75,12 +81,45 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
     { field: "balance_due", headerName: "Balance", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.balance_due) : "—") },
     { field: "status", headerName: "Status", width: 150, renderCell: ({ row: i }) => <InvoiceStatusChip invoice={i} /> },
     {
-      field: "actions", headerName: "Actions", width: 120, sortable: false, filterable: false, disableColumnMenu: true,
-      renderCell: ({ row: i }) => i.status === "draft"
-        ? <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); setIssuing(i); }}>Issue</Button>
-        : null,
+      field: "actions", headerName: "Actions", width: 170, sortable: false, filterable: false, disableColumnMenu: true,
+      renderCell: ({ row: i }) => (
+        <>
+          {i.status === "draft" && <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); setIssuing(i); }}>Issue</Button>}
+          <Tooltip title={i.status === "draft" ? "Preview PDF" : "View PDF"}>
+            <IconButton size="small" aria-label="View PDF" href={`/api/invoices/${i.id}/pdf`} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}><PictureAsPdfIcon fontSize="small" /></IconButton>
+          </Tooltip>
+          {i.status !== "draft" && (
+            <Tooltip title="Download PDF">
+              <IconButton size="small" aria-label="Download PDF" href={`/api/invoices/${i.id}/pdf?download=1`} onClick={(e) => e.stopPropagation()}><DownloadIcon fontSize="small" /></IconButton>
+            </Tooltip>
+          )}
+        </>
+      ),
     },
   ];
+
+  const drafts = (data?.items ?? []).filter((i) => i.status === "draft");
+
+  /** Issues every draft invoice of this sale, one after another (each gets the next number). */
+  async function issueAll() {
+    setIssueBusy(true);
+    let done = 0;
+    try {
+      const all = await api<{ items: InvoiceRow[] }>(`/api/invoices?saleId=${saleId}&status=draft&pageSize=100`);
+      for (const inv of all.items) {
+        await api(`/api/invoices/${inv.id}/issue`, { method: "POST" });
+        done++;
+      }
+      notify.success(`${done} invoice${done === 1 ? "" : "s"} issued`);
+    } catch (e) {
+      notify.error(`${done ? `${done} issued, then stopped: ` : ""}${e instanceof Error ? e.message : "Could not issue the invoices"}`);
+    } finally {
+      setIssueBusy(false);
+      setIssuingAll(false);
+      reload();
+      onChanged?.();
+    }
+  }
 
   async function issue() {
     if (!issuing) return;
@@ -111,7 +150,12 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
         compact={scoped} onRefresh={reload} refreshing={loading}
         search={{ value: search, onChange: setSearch, placeholder: "Search invoice number or client", label: "Search invoices" }}
         tabs={<SegmentedTabs label="Invoice filter" value={filter} onChange={(v) => { setFilter(v); setPage(0); }} tabs={FILTERS.map(([value, label]) => ({ value, label }))} />}
-        actions={showNew ? <Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button> : saleId ? saleAction : undefined}
+        actions={showNew ? <Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button> : saleId ? (
+          <>
+            {drafts.length > 0 && <Button variant="outlined" startIcon={<DoneAllIcon />} onClick={() => setIssuingAll(true)}>Issue all drafts</Button>}
+            {saleAction}
+          </>
+        ) : undefined}
         notice={scoped && data && data.total > 0 ? (
           <Typography variant="body2" color="text.secondary" sx={{ px: 2.5, pb: 1.5 }}>
             Invoiced (issued invoices): <strong>{formatMoney(data.totals.invoiced)}</strong> · Outstanding (invoiced minus payments allocated): <strong>{formatMoney(data.totals.outstanding)}</strong>
@@ -136,15 +180,19 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
     <ConfirmDialog open={Boolean(issuing)} title="Issue this invoice?" busy={issueBusy} confirmLabel="Issue invoice" onClose={() => setIssuing(null)} onConfirm={issue}
       message="An invoice number will be assigned and the invoice becomes a permanent record: it can no longer be edited or deleted, only cancelled with a reason." />
   );
+  const issueAllDialog = (
+    <ConfirmDialog open={issuingAll} title="Issue all draft invoices?" busy={issueBusy} confirmLabel="Issue all" onClose={() => setIssuingAll(false)} onConfirm={issueAll}
+      message="Every draft invoice of this sale gets its invoice number and becomes a permanent record: it can no longer be edited or deleted, only cancelled with a reason." />
+  );
   const dialog = adding ? <NewInvoiceDialog saleId={saleId ?? newSaleId} clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace("/invoices"); }} onCreated={() => { reload(); onChanged?.(); }} /> : null;
-  if (scoped) return <>{body}{dialog}{issueDialog}</>;
+  if (scoped) return <>{body}{dialog}{issueDialog}{issueAllDialog}</>;
   return (
     <>
       <PageHeader title="Invoices" subtitle="GST invoices raised against sales" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices" }]}
         actions={<Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button>} />
       {body}
       {dialog}
-      {issueDialog}
+      {issueDialog}{issueAllDialog}
     </>
   );
 }

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { OPTION_FIELD_KEYS } from "./registry";
 
 const target = z.object({
   table: z.string().trim().min(1),
@@ -17,4 +16,3 @@ export const updateOptionSchema = z.object({
 /** A stored option key (validated against field_options by the owning service). */
 export const optionKey = (label: string) =>
   z.string({ error: `${label} is required` }).trim().min(1, `${label} is required`).max(80);
-export { OPTION_FIELD_KEYS };
