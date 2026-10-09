@@ -102,7 +102,7 @@ export function ClientsList({ openNew = false }: { openNew?: boolean }) {
           />
         )}
       </ListLayout>
-      {adding && <ClientFormDialog onClose={() => { setAdding(false); if (openNew) router.replace("/clients"); }} onSaved={(id) => { setAdding(false); router.push(`/clients/${id}`); router.refresh(); }} />}
+      {adding && <ClientFormDialog onClose={() => { setAdding(false); if (openNew) router.replace("/clients"); }} onSaved={() => { setAdding(false); reload(); if (openNew) router.replace("/clients"); }} />}
     </>
   );
 }

@@ -13,8 +13,10 @@ import { ClientPicker } from "@/components/common/ClientPicker";
 import { useNotify } from "@/components/common/Notify";
 import { ApiError, api } from "@/lib/api-client";
 import { todayIST } from "@/lib/dates";
+import { formatMoney } from "@/lib/format";
 import { formatScaled, parseScaled } from "@/lib/money";
 import { OptionSelect } from "@/features/options/components/OptionSelect";
+import { PaymentLinkPickers } from "./PaymentLinkPickers";
 import { AllocationGrid, sumAllocations } from "./AllocationGrid";
 
 interface Props {
@@ -31,9 +33,12 @@ interface Props {
 
 const AMOUNT = /^\d+(\.\d{1,2})?$/;
 
-export function RecordPaymentDialog({ clientId: initialClient = "", focusInvoiceId, saleId, saleNumber, suggestedAmount, onClose, onSaved }: Props) {
+export function RecordPaymentDialog({ clientId: initialClient = "", focusInvoiceId, saleId: initialSale, saleNumber, suggestedAmount, onClose, onSaved }: Props) {
   const notify = useNotify();
   const [clientId, setClientId] = useState(initialClient);
+  const [saleId, setSaleId] = useState(initialSale ?? "");
+  const [invoiceId, setInvoiceId] = useState(focusInvoiceId ?? "");
+  const [invoiceBalance, setInvoiceBalance] = useState<string | null>(null);
   const [amount, setAmount] = useState(suggestedAmount && Number(suggestedAmount) > 0 ? suggestedAmount : "");
   const [date, setDate] = useState(todayIST());
   const [method, setMethod] = useState("bank_transfer");
@@ -43,9 +48,31 @@ export function RecordPaymentDialog({ clientId: initialClient = "", focusInvoice
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const validAmount = AMOUNT.test(amount) && Number(amount) > 0;
+  const overBalance = Boolean(invoiceId) && invoiceBalance !== null && AMOUNT.test(amount) && parseScaled(amount, 2) > parseScaled(invoiceBalance, 2);
+  const validAmount = AMOUNT.test(amount) && Number(amount) > 0 && !overBalance;
   const over = validAmount && sumAllocations(alloc) > parseScaled(amount, 2);
   const canSave = Boolean(clientId) && validAmount && !over && Boolean(date) && !busy;
+
+  /** Keeps the allocations in step with the amount: a picked invoice follows it (up to its balance), others are trimmed to fit. */
+  function changeAmount(v: string) {
+    setAmount(v);
+    if (!AMOUNT.test(v)) return;
+    const total = parseScaled(v, 2);
+    if (invoiceId) {
+      const cap = invoiceBalance !== null ? parseScaled(invoiceBalance, 2) : total;
+      setAlloc({ [invoiceId]: formatScaled(total < cap ? total : cap, 2) });
+      return;
+    }
+    let left = total;
+    const next: Record<string, string> = {};
+    for (const [id, val] of Object.entries(alloc)) {
+      if (!val.trim() || !AMOUNT.test(val.trim())) continue;
+      const take = parseScaled(val, 2) < left ? parseScaled(val, 2) : left;
+      if (take > 0n) next[id] = formatScaled(take, 2);
+      left -= take;
+    }
+    setAlloc(next);
+  }
 
   async function submit() {
     setBusy(true);
@@ -54,7 +81,7 @@ export function RecordPaymentDialog({ clientId: initialClient = "", focusInvoice
       const allocations = Object.entries(alloc)
         .filter(([, v]) => v.trim() && Number(v) > 0)
         .map(([invoiceId, v]) => ({ invoiceId, amount: v.trim() }));
-      const r = await api<{ id: string; receiptNumber: string }>("/api/payments", { method: "POST", body: { clientId, saleId: saleId ?? "", paymentDate: date, amount, method, reference, notes, allocations } });
+      const r = await api<{ id: string; receiptNumber: string }>("/api/payments", { method: "POST", body: { clientId, saleId, paymentDate: date, amount, method, reference, notes, allocations } });
       const left = formatScaled(parseScaled(amount, 2) - sumAllocations(alloc), 2);
       notify.success(`Payment ${r.receiptNumber} recorded${Number(left) > 0 ? `; ${left} kept as ${saleId ? "this sale's " : ""}advance` : ""}`);
       onSaved(r.id);
@@ -70,21 +97,34 @@ export function RecordPaymentDialog({ clientId: initialClient = "", focusInvoice
       <DialogContent>
         <Grid container spacing={2} sx={{ pt: 1 }}>
           {error && <Grid size={12}><Alert severity="error">{error}</Alert></Grid>}
-          {saleId && <Grid size={12}><Alert severity="info">Recorded for sale <strong>{saleNumber}</strong>. Part payments are fine: allocate what you can to the sale&apos;s invoices below; anything left stays as this sale&apos;s advance and can be applied when the next invoice is issued.</Alert></Grid>}
-          <Grid size={{ xs: 12, md: 6 }}>
-            <ClientPicker value={clientId} disabled={Boolean(initialClient)} onChange={(id) => { setClientId(id); setAlloc({}); }} />
+          {initialSale && <Grid size={12}><Alert severity="info">Recorded for sale <strong>{saleNumber}</strong>. Part payments are fine: allocate what you can to the sale&apos;s invoices below; anything left stays as this sale&apos;s advance and can be applied when the next invoice is issued.</Alert></Grid>}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <ClientPicker value={clientId} disabled={Boolean(initialClient)} onChange={(id) => { setClientId(id); setAlloc({}); setInvoiceId(""); if (!initialSale) setSaleId(""); }} />
           </Grid>
-          <Grid size={{ xs: 6, md: 3 }}>
-            <TextField label="Amount received (₹)" required fullWidth inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
-              error={amount !== "" && !validAmount} helperText={amount !== "" && !validAmount ? "Up to 2 decimals" : undefined} />
+          <PaymentLinkPickers
+              clientId={clientId} saleId={saleId} invoiceId={invoiceId} lockSale={Boolean(initialSale)} lockInvoice={false}
+              onPickSale={(sale) => { setSaleId(sale?.id ?? ""); setInvoiceId(""); setAlloc({}); if (sale && !initialClient) setClientId(sale.client_id); }}
+              onPickInvoice={(inv) => {
+                setInvoiceId(inv?.id ?? "");
+                setInvoiceBalance(inv?.balance_due ?? null);
+                if (!inv) { setAlloc({}); return; }
+                if (!initialClient) setClientId(inv.client_id);
+                if (!initialSale) setSaleId(inv.sale_id);
+                setAmount((cur) => (cur && Number(cur) > 0 && Number(cur) <= Number(inv.balance_due) ? cur : inv.balance_due));
+                setAlloc({ [inv.id]: Number(amount) > 0 && Number(amount) < Number(inv.balance_due) ? amount : inv.balance_due });
+              }}
+            />
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField label="Amount received (₹)" required fullWidth inputMode="decimal" value={amount} onChange={(e) => changeAmount(e.target.value)}
+              error={amount !== "" && !validAmount} helperText={overBalance ? `Cannot be more than the invoice balance (${formatMoney(invoiceBalance!)})` : amount !== "" && !validAmount ? "Up to 2 decimals" : undefined} />
           </Grid>
-          <Grid size={{ xs: 6, md: 3 }}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <TextField label="Payment date" type="date" required fullWidth value={date} onChange={(e) => setDate(e.target.value)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: todayIST() } }} />
           </Grid>
           <Grid size={{ xs: 12, md: 4 }}>
             <OptionSelect table="payments" column="method" label="Method" required value={method} onChange={setMethod} />
           </Grid>
-          <Grid size={{ xs: 12, md: 8 }}>
+          <Grid size={12}>
             <TextField label="Transaction / reference number" fullWidth value={reference} onChange={(e) => setReference(e.target.value)} />
           </Grid>
           <Grid size={12}><TextField label="Notes" fullWidth value={notes} onChange={(e) => setNotes(e.target.value)} /></Grid>
@@ -92,7 +132,7 @@ export function RecordPaymentDialog({ clientId: initialClient = "", focusInvoice
             <Grid size={12}>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>Apply to invoices (optional)</Typography>
               {validAmount ? (
-                <AllocationGrid clientId={clientId} available={amount} values={alloc} onChange={setAlloc} focusInvoiceId={focusInvoiceId} saleId={saleId} />
+                <AllocationGrid clientId={clientId} available={amount} values={alloc} onChange={setAlloc} focusInvoiceId={invoiceId || undefined} saleId={saleId || undefined} />
               ) : (
                 <Typography variant="body2" color="text.secondary">Enter the amount to allocate it across open invoices. Anything not allocated stays on account as an advance.</Typography>
               )}

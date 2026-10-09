@@ -1,7 +1,7 @@
 export interface NavItem {
   label: string;
   href: string;
-  icon: "dashboard" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "reports" | "settings";
+  icon: "dashboard" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
   ready: boolean;
 }
 
@@ -33,7 +33,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "Insights", dot: "#72E128",
     items: [
-      { label: "Reports", href: "/reports", icon: "reports", ready: true },
       { label: "Settings", href: "/settings", icon: "settings", ready: true },
     ],
   },

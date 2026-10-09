@@ -23,7 +23,7 @@ Internal web app for Dwapar Edge Private Limited to manage **clients, sales, sof
 - **Software licenses** register: issue, activate, renew, suspend, reinstate, revoke; full history; days remaining; renewal opportunities.
 - **Invoices** are always raised **against a sale**, in full, as a percentage, as an amount before GST, or as an instalment of the sale's billing plan, so a sale can be billed in parts without ever being over-billed. Professional PDF format: draft → issue → (cancel). CGST+SGST or IGST by state, per-line GST rates, round-off, amount in words, bank details. Issued invoices are immutable.
 - **Payments** ledger with allocation to invoices (partial, multi-invoice, advances), reallocation, void, receipts (PDF). Payments can be recorded **for a sale**: part payments reduce the sale's remaining balance, and money received before an invoice exists is held as that sale's **advance** and applied (by you, with one click) once an invoice is issued.
-- **Dashboard** and **11 reports** (CSV export), including the activity log.
+- **Dashboard** with KPIs, trend and receivables-ageing charts, pipeline, licence health and recent activity.
 
 Not in v1 (by decision): email sending, leads/follow-ups, quotations, credit notes, CSV client import, roles/permissions, e-invoicing (IRN). See [Known limitations](#known-limitations).
 

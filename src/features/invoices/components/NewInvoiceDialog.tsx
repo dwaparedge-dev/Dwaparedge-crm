@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
@@ -25,8 +24,7 @@ import type { MilestoneRow, SaleItemRow, SaleRow } from "@/features/sales/servic
 type Detail = SaleRow & { items: SaleItemRow[]; milestones: MilestoneRow[] };
 
 /** Invoices are raised against a sale: choose the sale, then how much of it to bill. */
-export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose }: { saleId?: string; clientId?: string; onClose: () => void }) {
-  const router = useRouter();
+export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose, onCreated }: { saleId?: string; clientId?: string; onClose: () => void; onCreated?: () => void }) {
   const notify = useNotify();
   const [saleId, setSaleId] = useState(initialSale ?? "");
   const [search, setSearch] = useState("");
@@ -78,7 +76,7 @@ export function NewInvoiceDialog({ saleId: initialSale, clientId, onClose }: { s
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>How much of {sale.data.sale_number} to bill</Typography>
               <BillSaleForm saleId={sale.data.id} subtotal={sale.data.subtotal} items={sale.data.items} milestones={sale.data.milestones}
                 onCancel={onClose}
-                onCreated={(id) => { notify.success("Draft invoice created. Review it, then issue it."); router.push(`/invoices/${id}`); }} />
+                onCreated={() => { notify.success("Draft invoice created. Open it from the list to review and issue it."); onCreated?.(); onClose(); }} />
             </CardContent>
           </Card>
         )

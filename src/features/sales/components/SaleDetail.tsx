@@ -56,6 +56,7 @@ export function SaleDetail({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [paymentsKey, setPaymentsKey] = useState(0);
+  const [invoicesKey, setInvoicesKey] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
   if (loading && !s) return <><Skeleton width={260} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
@@ -191,13 +192,15 @@ export function SaleDetail({ id }: { id: string }) {
             </TableContainer>
           </DetailTabPanel>
           <DetailTabPanel value={tab} index={1}><PlanTab key={s.updated_at + s.milestones.map((m) => m.invoice_id).join()} saleId={id} subtotal={s.subtotal} milestones={s.milestones} editable={editable} onChanged={reload} onBill={(mid) => setBilling({ milestoneId: mid })} /></DetailTabPanel>
-          <DetailTabPanel value={tab} index={2}><InvoicesList saleId={id} /></DetailTabPanel>
+          <DetailTabPanel value={tab} index={2}><InvoicesList key={invoicesKey} saleId={id} onChanged={reload}
+            saleAction={canBill ? <Button variant="contained" startIcon={<ReceiptIcon />} onClick={() => setBilling({})} disabled={Number(s.to_bill_taxable) <= 0}>Create invoice</Button> : undefined}
+            saleEmptyHint={canBill ? "Use “Create invoice” to bill this sale." : s.status === "draft" ? "Confirm the sale first; invoices can only be raised against a confirmed sale." : "Invoices cannot be raised against this sale."} /></DetailTabPanel>
           <DetailTabPanel value={tab} index={3}><PaymentsList key={paymentsKey} clientId={s.client_id} saleId={id} saleNumber={s.sale_number} suggestedAmount={s.due_on_invoices} onChanged={reload} /></DetailTabPanel>
         </DetailViewTabs>
       </DetailViewLayout>
 
       {action && <ConfirmDialog open title={COPY[action].title} message={COPY[action].message} confirmLabel={COPY[action].label} destructive={COPY[action].destructive} busy={busy} onConfirm={run} onClose={() => setAction(null)} />}
-      {billing && <BillSaleDialog saleId={id} subtotal={s.subtotal} items={s.items} milestones={s.milestones} initialMilestoneId={billing.milestoneId} onClose={() => setBilling(null)} />}
+      {billing && <BillSaleDialog saleId={id} subtotal={s.subtotal} items={s.items} milestones={s.milestones} initialMilestoneId={billing.milestoneId} onClose={() => setBilling(null)} onCreated={() => { reload(); setPaymentsKey((k) => k + 1); setInvoicesKey((k) => k + 1); }} />}
       {editing && <SaleFormDialog saleId={id} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
     </>
   );

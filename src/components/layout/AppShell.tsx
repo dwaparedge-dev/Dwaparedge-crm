@@ -28,7 +28,6 @@ import ProductsIcon from "@mui/icons-material/Inventory2Outlined";
 import SalesIcon from "@mui/icons-material/HandshakeOutlined";
 import LicensesIcon from "@mui/icons-material/VpnKeyOutlined";
 import InvoicesIcon from "@mui/icons-material/ReceiptLongOutlined";
-import ReportsIcon from "@mui/icons-material/AssessmentOutlined";
 import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import SettingsIcon from "@mui/icons-material/SettingsOutlined";
 import NotificationsIcon from "@mui/icons-material/NotificationsNoneOutlined";
@@ -50,7 +49,6 @@ const ICONS: Record<NavItem["icon"], React.ReactNode> = {
   licenses: <LicensesIcon />,
   invoices: <InvoicesIcon />,
   payments: <PaymentsIcon />,
-  reports: <ReportsIcon />,
   settings: <SettingsIcon />,
 };
 

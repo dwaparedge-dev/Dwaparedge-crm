@@ -128,7 +128,7 @@ export function LicensesList({ clientId, openNew = false, newClientId }: { clien
     </>
   );
 
-  const dialog = adding ? <LicenseFormDialog clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace(clientId ? `/clients/${clientId}` : "/licenses"); }} onSaved={(id) => { setAdding(false); router.push(`/licenses/${id}`); router.refresh(); }} /> : null;
+  const dialog = adding ? <LicenseFormDialog clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace(clientId ? `/clients/${clientId}` : "/licenses"); }} onSaved={() => { setAdding(false); reload(); if (openNew) router.replace(clientId ? `/clients/${clientId}` : "/licenses"); }} /> : null;
   if (clientId) return <>{body}{dialog}</>;
   return (
     <>

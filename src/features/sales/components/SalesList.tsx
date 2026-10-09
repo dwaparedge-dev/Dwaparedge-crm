@@ -118,7 +118,7 @@ export function SalesList({ clientId, openNew = false, newClientId }: Props & { 
     </>
   );
 
-  const dialog = adding ? <SaleFormDialog clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace(clientId ? `/clients/${clientId}` : "/sales"); }} onSaved={(id) => { setAdding(false); router.push(`/sales/${id}`); router.refresh(); }} /> : null;
+  const dialog = adding ? <SaleFormDialog clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace(clientId ? `/clients/${clientId}` : "/sales"); }} onSaved={() => { setAdding(false); reload(); if (openNew) router.replace(clientId ? `/clients/${clientId}` : "/sales"); }} /> : null;
   if (clientId) return <>{body}{dialog}</>;
   return (
     <>

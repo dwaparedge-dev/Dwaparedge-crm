@@ -55,6 +55,19 @@ export function AllocationGrid({ clientId, available, values, onChange, focusInv
     onChange(next);
   }
 
+  /** Keeps an entry within the invoice's balance and within what is left of the payment. */
+  function setAmount(inv: InvoiceRow, raw: string) {
+    let v = raw;
+    if (v.trim() && /^\d*(\.\d{0,2})?$/.test(v.trim())) {
+      const others = sumAllocations({ ...values, [inv.id]: "" });
+      const cap = parseScaled(inv.balance_due, 2);
+      const room = parseScaled(available || "0", 2) - others;
+      const max = room < cap ? (room > 0n ? room : 0n) : cap;
+      if (parseScaled(v.trim() === "." ? "0" : v, 2) > max) v = formatScaled(max, 2);
+    }
+    onChange({ ...values, [inv.id]: v });
+  }
+
   if (loading) return <TableSkeleton rows={3} cols={4} />;
   if (error) return <Typography color="error">{error}</Typography>;
   if (!data || data.items.length === 0) return <EmptyState title={saleId ? "No issued invoice with a balance on this sale" : "No open invoices for this client"} hint={saleId ? "The payment will be held as this sale's advance and can be applied when an invoice is issued." : "The payment will be recorded as an advance and can be allocated later."} />;
@@ -82,7 +95,7 @@ export function AllocationGrid({ clientId, available, values, onChange, focusInv
               <TableCell align="right">{formatMoney(inv.balance_due)}</TableCell>
               <TableCell align="right">
                 <TextField size="small" inputMode="decimal" value={values[inv.id] ?? ""} placeholder="0.00"
-                  onChange={(e) => onChange({ ...values, [inv.id]: e.target.value })} slotProps={{ htmlInput: { "aria-label": `Amount to allocate to ${inv.invoice_number}`, style: { textAlign: "right" } } }} />
+                  onChange={(e) => setAmount(inv, e.target.value)} slotProps={{ htmlInput: { "aria-label": `Amount to allocate to ${inv.invoice_number}`, style: { textAlign: "right" } } }} />
               </TableCell>
             </TableRow>
           ))}

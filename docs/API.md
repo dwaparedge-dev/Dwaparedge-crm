@@ -54,8 +54,6 @@ Mutating requests (`POST/PUT/PATCH/DELETE`) must send `Content-Type: application
 | `/api/allocations/{id}/reverse` | POST | `{reason}` |
 | `/api/settings` | GET, PUT | Company details, bank, numbering, defaults |
 | `/api/dashboard` | GET | `?from=&to=` (YYYY-MM-DD) |
-| `/api/reports` | GET | Catalogue of reports |
-| `/api/reports/{key}` | GET | Keys: `clients sales salebilling invoices payments outstanding overdue licenses renewals ledger activity`. `?format=csv` exports (≤ 50,000 rows) |
 | `/api/users/options` | GET | Active staff for dropdowns |
 | `/api/options` | GET, POST | GET `?table=&column=` lists a dropdown (no params: all, with usage, for Settings). POST `{table, column, label}` adds an option, or returns the existing one with the same name. Only whitelisted `table.column` pairs are accepted |
 | `/api/options/{id}` | PATCH, DELETE | PATCH `{label?, sortOrder?, isActive?}`; DELETE refused for built-in or in-use options |

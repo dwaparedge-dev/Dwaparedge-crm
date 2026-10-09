@@ -17,6 +17,9 @@ import type { GridColDef } from "@mui/x-data-grid";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLongOutlined";
 import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import HourglassIcon from "@mui/icons-material/HourglassEmptyOutlined";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { useNotify } from "@/components/common/Notify";
+import { api } from "@/lib/api-client";
 import { useFetch } from "@/components/common/useFetch";
 import { formatMoney } from "@/lib/format";
 import type { InvoiceRow } from "../service";
@@ -26,8 +29,11 @@ const FILTERS = [
   ["", "All invoices"], ["draft", "Drafts"], ["unpaid", "Unpaid"], ["partial", "Partially paid"], ["overdue", "Overdue"], ["paid", "Paid"], ["cancelled", "Cancelled"],
 ] as const;
 
-export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, newClientId }: { clientId?: string; saleId?: string; openNew?: boolean; newSaleId?: string; newClientId?: string }) {
+export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, newClientId, saleAction, saleEmptyHint, onChanged }: { onChanged?: () => void; saleAction?: React.ReactNode; saleEmptyHint?: string; clientId?: string; saleId?: string; openNew?: boolean; newSaleId?: string; newClientId?: string }) {
   const [adding, setAdding] = useState(openNew);
+  const notify = useNotify();
+  const [issuing, setIssuing] = useState<InvoiceRow | null>(null);
+  const [issueBusy, setIssueBusy] = useState(false);
   const scoped = Boolean(clientId || saleId);
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -68,7 +74,29 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
     { field: "amount_paid", headerName: "Paid", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.amount_paid) : "—") },
     { field: "balance_due", headerName: "Balance", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.balance_due) : "—") },
     { field: "status", headerName: "Status", width: 150, renderCell: ({ row: i }) => <InvoiceStatusChip invoice={i} /> },
+    {
+      field: "actions", headerName: "Actions", width: 120, sortable: false, filterable: false, disableColumnMenu: true,
+      renderCell: ({ row: i }) => i.status === "draft"
+        ? <Button size="small" variant="contained" onClick={(e) => { e.stopPropagation(); setIssuing(i); }}>Issue</Button>
+        : null,
+    },
   ];
+
+  async function issue() {
+    if (!issuing) return;
+    setIssueBusy(true);
+    try {
+      const r = await api<{ invoiceNumber: string }>(`/api/invoices/${issuing.id}/issue`, { method: "POST" });
+      notify.success(`Invoice ${r.invoiceNumber} issued`);
+      reload();
+      onChanged?.();
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : "Could not issue the invoice");
+    } finally {
+      setIssueBusy(false);
+      setIssuing(null);
+    }
+  }
 
   const body = (
     <>
@@ -83,7 +111,7 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
         compact={scoped} onRefresh={reload} refreshing={loading}
         search={{ value: search, onChange: setSearch, placeholder: "Search invoice number or client", label: "Search invoices" }}
         tabs={<SegmentedTabs label="Invoice filter" value={filter} onChange={(v) => { setFilter(v); setPage(0); }} tabs={FILTERS.map(([value, label]) => ({ value, label }))} />}
-        actions={showNew ? <Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button> : undefined}
+        actions={showNew ? <Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button> : saleId ? saleAction : undefined}
         notice={scoped && data && data.total > 0 ? (
           <Typography variant="body2" color="text.secondary" sx={{ px: 2.5, pb: 1.5 }}>
             Invoiced (issued invoices): <strong>{formatMoney(data.totals.invoiced)}</strong> · Outstanding (invoiced minus payments allocated): <strong>{formatMoney(data.totals.outstanding)}</strong>
@@ -96,7 +124,7 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
             page={page} pageSize={pageSize} onPageChange={(p, size) => { setPage(p); setPageSize(size); }}
             onRowClick={(i) => router.push(`/invoices/${i.id}`)}
             emptyTitle={filtered ? "No invoices match your filters" : "No invoices yet"}
-            emptyHint={filtered ? "Try different filters." : saleId ? "Use “Create invoice” above to bill this sale." : "Invoices are raised against a sale."}
+            emptyHint={filtered ? "Try different filters." : saleId ? (saleEmptyHint ?? "Use “Create invoice” to bill this sale.") : "Invoices are raised against a sale."}
             emptyAction={!filtered && !saleId ? <Button onClick={() => setAdding(true)} variant="contained">New invoice</Button> : undefined}
           />
         )}
@@ -104,14 +132,19 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
     </>
   );
 
-  const dialog = adding ? <NewInvoiceDialog saleId={saleId ?? newSaleId} clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace("/invoices"); }} /> : null;
-  if (scoped) return <>{body}{dialog}</>;
+  const issueDialog = (
+    <ConfirmDialog open={Boolean(issuing)} title="Issue this invoice?" busy={issueBusy} confirmLabel="Issue invoice" onClose={() => setIssuing(null)} onConfirm={issue}
+      message="An invoice number will be assigned and the invoice becomes a permanent record: it can no longer be edited or deleted, only cancelled with a reason." />
+  );
+  const dialog = adding ? <NewInvoiceDialog saleId={saleId ?? newSaleId} clientId={clientId ?? newClientId} onClose={() => { setAdding(false); if (openNew) router.replace("/invoices"); }} onCreated={() => { reload(); onChanged?.(); }} /> : null;
+  if (scoped) return <>{body}{dialog}{issueDialog}</>;
   return (
     <>
       <PageHeader title="Invoices" subtitle="GST invoices raised against sales" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices" }]}
         actions={<Button onClick={() => setAdding(true)} variant="contained" startIcon={<AddIcon />}>New invoice</Button>} />
       {body}
       {dialog}
+      {issueDialog}
     </>
   );
 }

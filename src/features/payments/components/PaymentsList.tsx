@@ -99,7 +99,7 @@ export function PaymentsList({ clientId, saleId, saleNumber, suggestedAmount, on
           />
         )}
       </ListLayout>
-      {recording && <RecordPaymentDialog clientId={clientId} saleId={saleId} saleNumber={saleNumber} suggestedAmount={suggestedAmount} onClose={() => setRecording(false)} onSaved={(id) => { setRecording(false); if (saleId) { reload(); onChanged?.(); } else router.push(`/payments/${id}`); }} />}
+      {recording && <RecordPaymentDialog clientId={clientId} saleId={saleId} saleNumber={saleNumber} suggestedAmount={suggestedAmount} onClose={() => setRecording(false)} onSaved={() => { setRecording(false); reload(); onChanged?.(); }} />}
     </>
   );
 

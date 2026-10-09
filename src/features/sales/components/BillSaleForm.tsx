@@ -3,12 +3,11 @@ import { useMemo, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import FormControl from "@mui/material/FormControl";
-import FormControlLabel from "@mui/material/FormControlLabel";
+import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
 import InputAdornment from "@mui/material/InputAdornment";
-import MenuItem from "@mui/material/MenuItem";
+import ButtonBase from "@mui/material/ButtonBase";
 import Radio from "@mui/material/Radio";
-import RadioGroup from "@mui/material/RadioGroup";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { planShares, type BillMode } from "@/lib/billing";
@@ -39,6 +38,7 @@ export function BillSaleForm({ saleId, subtotal, items, milestones, initialMiles
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const billedTaxable = items.reduce((a, i) => a + parseScaled(i.issued_taxable, 2) + parseScaled(i.draft_taxable, 2), 0n);
   const billable = items.map((i) => ({ id: i.id, taxable: i.taxable_amount, remaining: i.remaining_taxable }));
   const leftTaxable = billable.reduce((a, b) => a + parseScaled(b.remaining, 2), 0n);
 
@@ -87,40 +87,106 @@ export function BillSaleForm({ saleId, subtotal, items, milestones, initialMiles
   }
 
   const canSubmit = !busy && preview !== null && !preview.error && (mode !== "milestone" || Boolean(milestoneId));
+  const gst = preview && !preview.error ? formatScaled(parseScaled(preview.total, 2) - parseScaled(preview.taxable, 2), 2) : null;
+  const after = preview && !preview.error ? leftTaxable - parseScaled(preview.taxable, 2) : null;
+
+  const options: { value: Mode; title: string; hint: string; disabled?: boolean; body?: React.ReactNode }[] = [
+    { value: "rest", title: "Everything that's left", hint: `${formatMoney(formatScaled(leftTaxable, 2))} before GST, closes the billing of this sale` },
+    {
+      value: "percent", title: "A percentage of the order", hint: "Taken from each item's value, capped at what's left",
+      body: (
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap", mt: 1.5 }}>
+          <TextField size="small" label="Percentage" value={percent} onChange={(e) => setPercent(e.target.value)} autoFocus inputMode="decimal" sx={{ width: 150 }}
+            slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }} />
+          {["25", "30", "50", "100"].map((p) => <Chip key={p} size="small" label={`${p}%`} variant={percent === p ? "filled" : "outlined"} color={percent === p ? "primary" : "default"} onClick={() => setPercent(p)} />)}
+        </Box>
+      ),
+    },
+    {
+      value: "amount", title: "A fixed amount", hint: "Before GST; GST is added on top and split across items in proportion",
+      body: (
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap", mt: 1.5 }}>
+          <TextField size="small" label="Amount before GST" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus inputMode="decimal" sx={{ width: 200 }}
+            slotProps={{ input: { startAdornment: <InputAdornment position="start">₹</InputAdornment> } }} />
+          <Chip size="small" label="Use all that's left" variant="outlined" onClick={() => setAmount(formatScaled(leftTaxable, 2))} />
+        </Box>
+      ),
+    },
+    {
+      value: "milestone", title: "An instalment from the billing plan", disabled: planned.length === 0,
+      hint: planned.length ? `${planned.length} planned instalment${planned.length > 1 ? "s" : ""} not yet invoiced` : "No instalment planned; add one in the Billing plan tab",
+      body: (
+        <Box sx={{ display: "grid", gap: 0.75, mt: 1.5 }}>
+          {planned.map((m) => (
+            <ButtonBase key={m.id} onClick={() => setMilestoneId(m.id)} sx={{ display: "flex", justifyContent: "space-between", textAlign: "left", p: 1, borderRadius: 1.5, border: 1, borderColor: milestoneId === m.id ? "primary.main" : "divider", bgcolor: milestoneId === m.id ? "action.selected" : "transparent" }}>
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>{m.title}</Typography>
+                <Typography variant="caption" color="text.secondary">{m.basis === "percent" ? `${Number(m.percent)}% of the order` : "Fixed amount"}{m.due_date ? ` · due ${m.due_date}` : ""}</Typography>
+              </Box>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>{formatMoney(m.taxable)}</Typography>
+            </ButtonBase>
+          ))}
+        </Box>
+      ),
+    },
+  ];
+
   return (
     <Box sx={{ display: "grid", gap: 2 }}>
       {error && <Alert severity="error">{error}</Alert>}
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: 1, borderColor: "divider", borderRadius: 2, overflow: "hidden" }}>
+        {[
+          ["Order value", formatMoney(subtotal), "before GST"],
+          ["Already billed", formatMoney(formatScaled(billedTaxable, 2)), "issued + drafts"],
+          ["Left to bill", formatMoney(formatScaled(leftTaxable, 2)), "before GST"],
+        ].map(([label, value, hint], i) => (
+          <Box key={label} sx={{ p: 1.5, borderLeft: i ? 1 : 0, borderColor: "divider" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>{label}</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.3 }}>{value}</Typography>
+            <Typography variant="caption" color="text.secondary">{hint}</Typography>
+          </Box>
+        ))}
+      </Box>
       {leftTaxable <= 0n ? (
         <Alert severity="info">Everything on this sale is already on an invoice (or a draft). Delete a draft or cancel an invoice to bill it again.</Alert>
       ) : (
-        <FormControl>
-          <RadioGroup value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-            <FormControlLabel value="rest" control={<Radio />} label={`Everything that's left (${formatMoney(formatScaled(leftTaxable, 2))} before GST)`} />
-            <FormControlLabel value="percent" control={<Radio />} label="A percentage of the order" />
-            {mode === "percent" && (
-              <TextField size="small" label="Percentage" value={percent} onChange={(e) => setPercent(e.target.value)} autoFocus sx={{ ml: 4, mb: 1, maxWidth: 200 }} inputMode="decimal"
-                slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }} helperText="Of each item's value, capped at what's left" />
-            )}
-            <FormControlLabel value="amount" control={<Radio />} label="A fixed amount (before GST)" />
-            {mode === "amount" && (
-              <TextField size="small" label="Amount before GST" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus sx={{ ml: 4, mb: 1, maxWidth: 240 }} inputMode="decimal"
-                slotProps={{ input: { startAdornment: <InputAdornment position="start">₹</InputAdornment> } }} helperText="GST is added on top. Split across items in proportion to what's left" />
-            )}
-            <FormControlLabel value="milestone" disabled={planned.length === 0} control={<Radio />} label={planned.length ? "An instalment from the billing plan" : "An instalment from the billing plan (none planned)"} />
-            {mode === "milestone" && (
-              <TextField select size="small" label="Instalment" value={milestoneId} onChange={(e) => setMilestoneId(e.target.value)} sx={{ ml: 4, mb: 1, maxWidth: 320 }}>
-                {planned.map((m) => <MenuItem key={m.id} value={m.id}>{m.title} · {m.basis === "percent" ? `${Number(m.percent)}%` : formatMoney(m.amount!)}{m.due_date ? ` · due ${m.due_date}` : ""}</MenuItem>)}
-              </TextField>
-            )}
-          </RadioGroup>
-        </FormControl>
+        <Box role="radiogroup" aria-label="What to bill" sx={{ display: "grid", gap: 1 }}>
+          {options.map((o) => {
+            const selected = mode === o.value;
+            return (
+              <Box key={o.value} sx={{ border: 1, borderColor: selected ? "primary.main" : "divider", borderRadius: 2, bgcolor: selected ? "action.hover" : "transparent", opacity: o.disabled ? 0.55 : 1 }}>
+                <ButtonBase disabled={o.disabled} onClick={() => setMode(o.value)} role="radio" aria-checked={selected} sx={{ display: "flex", width: "100%", justifyContent: "flex-start", alignItems: "flex-start", textAlign: "left", p: 1.25, borderRadius: 2 }}>
+                  <Radio checked={selected} disabled={o.disabled} tabIndex={-1} sx={{ p: 0.5, mr: 1 }} />
+                  <Box>
+                    <Typography variant="body1" sx={{ fontWeight: 600 }}>{o.title}</Typography>
+                    <Typography variant="caption" color="text.secondary">{o.hint}</Typography>
+                  </Box>
+                </ButtonBase>
+                {selected && o.body && <Box sx={{ px: 1.25, pb: 1.25, pl: 5.5 }}>{o.body}</Box>}
+              </Box>
+            );
+          })}
+        </Box>
       )}
-      {preview && (
+      {leftTaxable > 0n && (
         <Box sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: 2 }}>
-          {preview.error ? <Typography color="error" variant="body2">{preview.error}</Typography> : (
+          {!preview ? (
+            <Typography variant="body2" color="text.secondary">Enter {mode === "percent" ? "a percentage" : mode === "amount" ? "an amount" : "your choice"} to see what this invoice will be.</Typography>
+          ) : preview.error ? <Typography color="error" variant="body2">{preview.error}</Typography> : (
             <>
-              <Typography variant="body2">This invoice: <strong>{formatMoney(preview.taxable)}</strong> before GST · about <strong>{formatMoney(preview.total)}</strong> with GST</Typography>
-              <Typography variant="caption" color="text.secondary">The draft is created for you to review. CGST/SGST or IGST and the final total are set from the client’s state.</Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", rowGap: 0.5, columnGap: 2 }}>
+                <Typography variant="body2" color="text.secondary">Taxable value</Typography><Typography variant="body2" align="right">{formatMoney(preview.taxable)}</Typography>
+                <Typography variant="body2" color="text.secondary">GST (approx.)</Typography><Typography variant="body2" align="right">{formatMoney(gst!)}</Typography>
+              </Box>
+              <Divider sx={{ my: 1 }} />
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="body1" sx={{ fontWeight: 700 }}>Invoice total</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700 }}>{formatMoney(preview.total)}</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                {after! > 0n ? `${formatMoney(formatScaled(after!, 2))} will still be left to bill after this. ` : "This closes the billing of the sale. "}
+                CGST/SGST or IGST are set from the client&apos;s state; a draft is created for you to review before issuing.
+              </Typography>
             </>
           )}
         </Box>
