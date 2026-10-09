@@ -25,6 +25,7 @@ import { SalesList } from "@/features/sales/components/SalesList";
 import { ActivityTab } from "./ActivityTab";
 import { ContactsTab } from "./ContactsTab";
 import { StatusChip } from "./ClientsList";
+import { stateNameByCode } from "@/lib/india";
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -64,7 +65,7 @@ export function ClientDetail({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={<>{c.display_name} <StatusChip status={c.status} archived={archived} /></>}
+        title={<>{c.display_name} <StatusChip archived={archived} /></>}
         crumbs={[{ label: "Dashboard", href: "/" }, { label: "Clients", href: "/clients" }, { label: c.display_name }]}
         actions={
           <>
@@ -92,7 +93,7 @@ export function ClientDetail({ id }: { id: string }) {
               <Grid size={{ xs: 12, md: 6 }}><Field label="Account owner" value={c.owner_name} /></Grid>
               <Grid size={{ xs: 12, md: 4 }}><Field label="GSTIN" value={c.gstin} /></Grid>
               <Grid size={{ xs: 12, md: 4 }}><Field label="PAN" value={c.pan} /></Grid>
-              <Grid size={{ xs: 12, md: 4 }}><Field label="State" value={c.state ? `${c.state} (${c.state_code})` : null} /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}><Field label="State" value={stateNameByCode(c.state_code) ? `${stateNameByCode(c.state_code)} (${c.state_code})` : null} /></Grid>
               <Grid size={{ xs: 12, md: 4 }}><Field label="Email" value={c.email} /></Grid>
               <Grid size={{ xs: 12, md: 4 }}><Field label="Phone" value={c.phone} /></Grid>
               <Grid size={{ xs: 12, md: 4 }}><Field label="City / Postal code" value={[c.city, c.postal_code].filter(Boolean).join(" · ")} /></Grid>

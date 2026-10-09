@@ -30,7 +30,8 @@ const FILTERS = [
   ["", "All invoices"], ["draft", "Drafts"], ["unpaid", "Unpaid"], ["partial", "Partially paid"], ["overdue", "Overdue"], ["paid", "Paid"], ["cancelled", "Cancelled"],
 ] as const;
 
-export function InvoicesList({ clientId }: { clientId?: string }) {
+export function InvoicesList({ clientId, saleId }: { clientId?: string; saleId?: string }) {
+  const scoped = Boolean(clientId || saleId);
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -45,41 +46,43 @@ export function InvoicesList({ clientId }: { clientId?: string }) {
 
   const qs = new URLSearchParams({ page: String(page + 1), pageSize: String(pageSize) });
   if (clientId) qs.set("clientId", clientId);
+  if (saleId) qs.set("saleId", saleId);
   if (debounced) qs.set("search", debounced);
   if (filter === "draft" || filter === "cancelled") qs.set("status", filter);
   else if (filter) qs.set("paymentStatus", filter);
   const { data, error, loading, reload } = useFetch<{ items: InvoiceRow[]; total: number; totals: { invoiced: string; outstanding: string } }>(`/api/invoices?${qs}`);
 
   const newHref = clientId ? `/invoices/new?clientId=${clientId}` : "/invoices/new";
+  const showNew = Boolean(clientId) && !saleId;
   const filtered = Boolean(debounced || filter);
 
   const body = (
-    <Card variant={clientId ? "elevation" : "outlined"} elevation={0} sx={clientId ? { border: 0 } : undefined}>
-      <Box sx={{ p: clientId ? 0 : 2, pb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
+    <Card variant={scoped ? "elevation" : "outlined"} elevation={0} sx={scoped ? { border: 0 } : undefined}>
+      <Box sx={{ p: scoped ? 0 : 2, pb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
         <TextField size="small" placeholder="Search invoice number or client" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ flex: "1 1 240px", maxWidth: 380 }}
           slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }, htmlInput: { "aria-label": "Search invoices" } }} />
         <TextField select size="small" label="Show" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0); }} sx={{ minWidth: 170 }}>
           {FILTERS.map(([v, l]) => <MenuItem key={v} value={v}>{l}</MenuItem>)}
         </TextField>
-        {clientId && <Box sx={{ ml: "auto" }}><Button component={Link} href={newHref} variant="contained" startIcon={<AddIcon />}>New invoice</Button></Box>}
+        {showNew && <Box sx={{ ml: "auto" }}><Button component={Link} href={newHref} variant="contained" startIcon={<AddIcon />}>New invoice</Button></Box>}
       </Box>
       {data && data.total > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ px: clientId ? 0 : 2, pb: 1.5 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ px: scoped ? 0 : 2, pb: 1.5 }}>
           Invoiced (issued invoices): <strong>{formatMoney(data.totals.invoiced)}</strong> · Outstanding (invoiced minus payments allocated): <strong>{formatMoney(data.totals.outstanding)}</strong>
         </Typography>
       )}
       {error ? <ErrorState message={error} onRetry={reload} />
         : loading && !data ? <TableSkeleton />
         : data && data.items.length === 0 ? (
-          <EmptyState title={filtered ? "No invoices match your filters" : "No invoices yet"} hint={filtered ? "Try different filters." : "Create an invoice, or start one from a sale."}
-            action={!filtered ? <Button component={Link} href={newHref} variant="contained">New invoice</Button> : undefined} />
+          <EmptyState title={filtered ? "No invoices match your filters" : "No invoices yet"} hint={filtered ? "Try different filters." : saleId ? "Use “Create invoice” above to bill this sale." : "Invoices are raised against a sale."}
+            action={!filtered && !saleId ? <Button component={Link} href={newHref} variant="contained">New invoice</Button> : undefined} />
         ) : (
           <>
             <TableContainer sx={{ opacity: loading ? 0.6 : 1 }}>
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>Invoice</TableCell>{!clientId && <TableCell>Client</TableCell>}<TableCell>Date</TableCell><TableCell>Due</TableCell>
+                    <TableCell>Invoice</TableCell>{!scoped && <TableCell>Client</TableCell>}{!saleId && <TableCell>Sale</TableCell>}<TableCell>Date</TableCell><TableCell>Due</TableCell>
                     <TableCell align="right">Total</TableCell><TableCell align="right">Paid</TableCell><TableCell align="right">Balance</TableCell><TableCell>Status</TableCell>
                   </TableRow>
                 </TableHead>
@@ -89,7 +92,8 @@ export function InvoicesList({ clientId }: { clientId?: string }) {
                       <TableCell>
                         <Link href={`/invoices/${i.id}`} onClick={(e) => e.stopPropagation()} style={{ color: "inherit", fontWeight: 600, textDecoration: "none" }}>{i.invoice_number ?? "Draft"}</Link>
                       </TableCell>
-                      {!clientId && <TableCell>{i.client_name}</TableCell>}
+                      {!scoped && <TableCell>{i.client_name}</TableCell>}
+                      {!saleId && <TableCell><Link href={`/sales/${i.sale_id}`} onClick={(e) => e.stopPropagation()}>{i.sale_number}</Link></TableCell>}
                       <TableCell>{format(new Date(i.issue_date), "dd MMM yyyy")}</TableCell>
                       <TableCell>{format(new Date(i.due_date), "dd MMM yyyy")}</TableCell>
                       <TableCell align="right">{formatMoney(i.total)}</TableCell>
@@ -108,7 +112,7 @@ export function InvoicesList({ clientId }: { clientId?: string }) {
     </Card>
   );
 
-  if (clientId) return body;
+  if (scoped) return body;
   return (
     <>
       <PageHeader title="Invoices" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices" }]}

@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
+import { resolveOption } from "@/features/options/service";
 import { AppError } from "@/lib/auth/errors";
 import { likePattern } from "@/lib/validation";
 import type { ProductInput } from "./schema";
@@ -15,9 +16,7 @@ export interface ProductRow {
   description: string | null;
   hsn_sac: string | null;
   default_price: string;
-  currency: string;
   gst_rate: string;
-  is_tax_exempt: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -61,7 +60,7 @@ export async function getProduct(id: string) {
   return row;
 }
 
-const params = (i: ProductInput) => [i.name, i.sku, i.type, i.description, i.hsnSac, i.defaultPrice, i.currency, i.gstRate, i.isTaxExempt, i.isActive];
+const params = (i: ProductInput) => [i.name, i.sku, i.type, i.description, i.hsnSac, i.defaultPrice, i.gstRate, i.isActive];
 
 function mapSkuConflict(e: unknown): never {
   if ((e as { code?: string }).code === "23505") throw new AppError("Another product already uses this SKU", 409, "DUPLICATE_SKU");
@@ -71,9 +70,10 @@ function mapSkuConflict(e: unknown): never {
 export async function createProduct(input: ProductInput, actorId: string) {
   try {
     return await db.transaction(async (tx) => {
+      input = { ...input, type: await resolveOption("products", "type", input.type, tx) };
       const { rows } = await tx.query<{ id: string }>(
-        `INSERT INTO products (name, sku, type, description, hsn_sac, default_price, currency, gst_rate, is_tax_exempt, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        `INSERT INTO products (name, sku, type, description, hsn_sac, default_price, gst_rate, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
         params(input),
       );
       const id = rows[0]!.id;
@@ -89,9 +89,10 @@ export async function createProduct(input: ProductInput, actorId: string) {
 export async function updateProduct(id: string, input: ProductInput, actorId: string) {
   try {
     await db.transaction(async (tx) => {
+      input = { ...input, type: await resolveOption("products", "type", input.type, tx, { allowInactive: true }) };
       const { rowCount } = await tx.query(
-        `UPDATE products SET name=$1, sku=$2, type=$3, description=$4, hsn_sac=$5, default_price=$6, currency=$7,
-           gst_rate=$8, is_tax_exempt=$9, is_active=$10, updated_at=now() WHERE id=$11`,
+        `UPDATE products SET name=$1, sku=$2, type=$3, description=$4, hsn_sac=$5, default_price=$6,
+           gst_rate=$7, is_active=$8, updated_at=now() WHERE id=$9`,
         [...params(input), id],
       );
       if (!rowCount) throw new AppError("Product not found", 404, "NOT_FOUND");

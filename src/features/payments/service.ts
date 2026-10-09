@@ -3,10 +3,12 @@ import type { PoolClient } from "pg";
 import type { z } from "zod";
 import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
+import { resolveOption } from "@/features/options/service";
 import { AppError } from "@/lib/auth/errors";
 import { todayIST } from "@/lib/dates";
 import { financialYear } from "@/lib/gst";
 import { nextSequence } from "@/lib/sequences";
+import { formatScaled, parseScaled } from "@/lib/money";
 import { likePattern } from "@/lib/validation";
 import { getSettings } from "@/features/settings/service";
 import { validateAllocationPlan, type InvoiceState } from "./allocation";
@@ -17,6 +19,9 @@ export interface PaymentRow {
   receipt_number: string;
   client_id: string;
   client_name: string;
+  sale_id: string | null;
+  sale_number: string | null;
+  applied_to_sale?: string;
   payment_date: string;
   amount: string;
   currency: string;
@@ -37,11 +42,11 @@ export interface AllocationRow {
 
 const ALLOCATED = `COALESCE((SELECT sum(a.amount) FROM payment_allocations a WHERE a.payment_id = p.id AND a.reversed_at IS NULL), 0)`;
 const SELECT = `
-  SELECT p.id, p.receipt_number, p.client_id, c.display_name AS client_name, to_char(p.payment_date,'YYYY-MM-DD') AS payment_date, p.amount, p.currency,
+  SELECT p.id, p.receipt_number, p.client_id, c.display_name AS client_name, p.sale_id, sl.sale_number, to_char(p.payment_date,'YYYY-MM-DD') AS payment_date, p.amount, p.currency,
          p.method, p.reference, p.notes, p.voided_at, p.void_reason, u.name AS recorded_by_name, p.created_at,
          ${ALLOCATED} AS allocated,
          CASE WHEN p.voided_at IS NULL THEN p.amount - ${ALLOCATED} ELSE 0 END AS unallocated
-  FROM payments p JOIN clients c ON c.id = p.client_id LEFT JOIN users u ON u.id = p.recorded_by`;
+  FROM payments p JOIN clients c ON c.id = p.client_id LEFT JOIN sales sl ON sl.id = p.sale_id LEFT JOIN users u ON u.id = p.recorded_by`;
 
 export async function listPayments(p: z.infer<typeof listPaymentsSchema>) {
   const where: string[] = [];
@@ -51,6 +56,11 @@ export async function listPayments(p: z.infer<typeof listPaymentsSchema>) {
     return `$${values.length}`;
   };
   if (p.clientId) where.push(`p.client_id = ${add(p.clientId)}`);
+  let saleParam = "";
+  if (p.saleId) {
+    saleParam = add(p.saleId);
+    where.push(`(p.sale_id = ${saleParam} OR EXISTS (SELECT 1 FROM payment_allocations a JOIN invoices ai ON ai.id = a.invoice_id WHERE a.payment_id = p.id AND ai.sale_id = ${saleParam}))`);
+  }
   if (p.method) where.push(`p.method = ${add(p.method)}`);
   if (p.from) where.push(`p.payment_date >= ${add(p.from)}`);
   if (p.to) where.push(`p.payment_date <= ${add(p.to)}`);
@@ -64,7 +74,7 @@ export async function listPayments(p: z.infer<typeof listPaymentsSchema>) {
   const limit = add(p.pageSize);
   const offset = add((p.page - 1) * p.pageSize);
   const rows = await db.query<PaymentRow & { total_rows: string }>(
-    `${SELECT.replace("SELECT p.id", "SELECT count(*) OVER() AS total_rows, p.id")} ${whereSql} ORDER BY p.payment_date DESC, p.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    `${SELECT.replace("SELECT p.id", `SELECT count(*) OVER() AS total_rows${saleParam ? `, COALESCE((SELECT sum(a.amount) FROM payment_allocations a JOIN invoices ai ON ai.id = a.invoice_id WHERE a.payment_id = p.id AND a.reversed_at IS NULL AND ai.sale_id = ${saleParam}), 0)::numeric(14,2) AS applied_to_sale` : ""}, p.id`)} ${whereSql} ORDER BY p.payment_date DESC, p.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
     values,
   );
   // "Collected" = payments received and not voided, regardless of how much is allocated to invoices yet.
@@ -139,13 +149,20 @@ export async function recordPayment(input: PaymentInput, actorId: string) {
   return db.transaction(async (tx) => {
     const client = await tx.query<{ archived_at: string | null }>("SELECT archived_at FROM clients WHERE id = $1", [input.clientId]);
     if (!client.rowCount) throw new AppError("Client not found", 404, "NOT_FOUND");
+    if (input.saleId) {
+      const sale = (await tx.query<{ client_id: string; status: string; sale_number: string }>("SELECT client_id, status, sale_number FROM sales WHERE id = $1", [input.saleId])).rows[0];
+      if (!sale) throw new AppError("Sale not found", 404, "NOT_FOUND");
+      if (sale.client_id !== input.clientId) throw new AppError(`Sale ${sale.sale_number} belongs to a different client`, 422, "VALIDATION_ERROR");
+      if (sale.status === "cancelled") throw new AppError(`Sale ${sale.sale_number} is cancelled`, 409, "SALE_CANCELLED");
+    }
 
+    input = { ...input, method: await resolveOption("payments", "method", input.method, tx) };
     const settings = await getSettings(tx);
     const fy = financialYear(input.paymentDate);
     const receipt = `${settings.receipt_prefix}/${fy}/${String(await nextSequence("receipt", fy, tx)).padStart(4, "0")}`;
     const { rows } = await tx.query<{ id: string }>(
-      `INSERT INTO payments (receipt_number, client_id, payment_date, amount, method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [receipt, input.clientId, input.paymentDate, input.amount, input.method, input.reference, input.notes, actorId],
+      `INSERT INTO payments (receipt_number, client_id, sale_id, payment_date, amount, method, reference, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [receipt, input.clientId, input.saleId, input.paymentDate, input.amount, input.method, input.reference, input.notes, actorId],
     );
     const id = rows[0]!.id;
     await logActivity({ entityType: "payment", entityId: id, clientId: input.clientId, action: "recorded", summary: `Payment ${receipt} of ${input.amount} recorded`, actorId, metadata: { method: input.method } }, tx);
@@ -189,5 +206,47 @@ export async function voidPayment(paymentId: string, reason: string, actorId: st
     if (live.rowCount) throw new AppError("This payment is allocated to invoices. Reverse those allocations first.", 409, "HAS_ALLOCATIONS");
     await tx.query("UPDATE payments SET voided_at = now(), voided_by = $1, void_reason = $2 WHERE id = $3", [actorId, reason, paymentId]);
     await logActivity({ entityType: "payment", entityId: paymentId, clientId: p.client_id, action: "voided", summary: `Payment ${p.receipt_number} voided: ${reason}`, actorId }, tx);
+  });
+}
+
+/**
+ * Applies money received for a sale (and not yet allocated) to that sale's issued invoices, oldest due
+ * first. Explicit on purpose: the user triggers it, so allocations are never made silently.
+ */
+export async function applyAdvance(saleId: string, actorId: string, invoiceId?: string) {
+  return db.transaction(async (tx) => {
+    const sale = (await tx.query<{ id: string; sale_number: string }>("SELECT id, sale_number FROM sales WHERE id = $1 FOR UPDATE", [saleId])).rows[0];
+    if (!sale) throw new AppError("Sale not found", 404, "NOT_FOUND");
+
+    const pays = (await tx.query<{ id: string; unallocated: string }>(
+      `SELECT p.id, (p.amount - COALESCE((SELECT sum(a.amount) FROM payment_allocations a WHERE a.payment_id = p.id AND a.reversed_at IS NULL), 0)) AS unallocated
+         FROM payments p WHERE p.sale_id = $1 AND p.voided_at IS NULL ORDER BY p.payment_date, p.created_at, p.id FOR UPDATE OF p`, [saleId],
+    )).rows.filter((p) => parseScaled(p.unallocated, 2) > 0n);
+    if (!pays.length) throw new AppError("There is no unallocated advance for this sale", 409, "NO_ADVANCE");
+
+    // Lock first, then read balances (read-committed would not see a concurrent allocation otherwise).
+    await tx.query("SELECT id FROM invoices WHERE sale_id = $1 AND status = 'issued' AND ($2::uuid IS NULL OR id = $2) ORDER BY id FOR UPDATE", [saleId, invoiceId ?? null]);
+    const invs = (await tx.query<{ id: string; balance: string }>(
+      `SELECT i.id, (i.total - COALESCE((SELECT sum(a.amount) FROM payment_allocations a WHERE a.invoice_id = i.id AND a.reversed_at IS NULL), 0)) AS balance
+         FROM invoices i WHERE i.sale_id = $1 AND i.status = 'issued' AND ($2::uuid IS NULL OR i.id = $2) ORDER BY i.due_date, i.issue_date, i.id`, [saleId, invoiceId ?? null],
+    )).rows.map((i) => ({ id: i.id, left: parseScaled(i.balance, 2) })).filter((i) => i.left > 0n);
+    if (!invs.length) throw new AppError("This sale has no issued invoice with a balance to apply the advance to", 409, "NOTHING_TO_APPLY");
+
+    let applied = 0n;
+    for (const p of pays) {
+      let avail = parseScaled(p.unallocated, 2);
+      const plan: { invoiceId: string; amount: string }[] = [];
+      for (const inv of invs) {
+        if (avail <= 0n) break;
+        if (inv.left <= 0n) continue;
+        const take = inv.left < avail ? inv.left : avail;
+        plan.push({ invoiceId: inv.id, amount: formatScaled(take, 2) });
+        inv.left -= take;
+        avail -= take;
+        applied += take;
+      }
+      if (plan.length) await allocateInTx(tx, p.id, plan, actorId);
+    }
+    return formatScaled(applied, 2);
   });
 }

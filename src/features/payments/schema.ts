@@ -1,10 +1,7 @@
 import { z } from "zod";
+import { optionKey } from "@/features/options/schema";
 import { decimal, isoDate, optionalText, pageParams, uuid } from "@/lib/validation";
 
-export const PAYMENT_METHODS = ["bank_transfer", "upi", "cash", "cheque", "other"] as const;
-export const PAYMENT_METHOD_LABELS: Record<(typeof PAYMENT_METHODS)[number], string> = {
-  bank_transfer: "Bank transfer", upi: "UPI", cash: "Cash", cheque: "Cheque", other: "Other",
-};
 
 export const allocationInputSchema = z.object({
   invoiceId: uuid,
@@ -15,9 +12,11 @@ export type AllocationInput = z.infer<typeof allocationInputSchema>;
 export const paymentInputSchema = z
   .object({
     clientId: uuid,
+    /** Tag the payment to a sale: whatever is not allocated to an invoice yet is that sale's advance. */
+    saleId: z.preprocess((v) => (v === "" ? null : v), uuid.nullable().default(null)),
     paymentDate: isoDate,
     amount: decimal(2, "Amount").refine((v) => Number(v) > 0, "Amount must be greater than 0"),
-    method: z.enum(PAYMENT_METHODS, { error: "Select a payment method" }),
+    method: optionKey("Payment method"),
     reference: optionalText(100),
     notes: optionalText(1000),
     allocations: z.array(allocationInputSchema).max(100).default([]),
@@ -34,8 +33,11 @@ export const reasonSchema = z.object({ reason });
 
 export const listPaymentsSchema = pageParams.extend({
   clientId: uuid.optional(),
-  method: z.enum(PAYMENT_METHODS).optional(),
+  saleId: uuid.optional(),
+  method: z.string().trim().max(80).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
   includeVoided: z.enum(["true", "false"]).default("false"),
 });
+
+export const applyAdvanceSchema = z.object({ invoiceId: z.preprocess((v) => (v === "" ? undefined : v), uuid.optional()) });

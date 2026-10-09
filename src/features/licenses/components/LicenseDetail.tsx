@@ -16,6 +16,7 @@ import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemText from "@mui/material/ListItemText";
 import Skeleton from "@mui/material/Skeleton";
+import { OptionLabel } from "@/features/options/components/OptionSelect";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { format, parseISO } from "date-fns";
@@ -109,7 +110,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function describe(e: LicenseEventRow): string | null {
   const d = e.details ?? {};
   if (e.event_type === "renewed") return `Expiry ${d.oldExpiry} → ${d.newExpiry}${d.renewalPrice ? ` · renewal price ${formatMoney(String(d.renewalPrice))}` : ""}`;
-  if (e.event_type === "issued") return `Plan ${d.plan}, expires ${d.expiryDate}`;
+  if (e.event_type === "issued") return `Expires ${d.expiryDate}`;
   return null;
 }
 
@@ -147,7 +148,7 @@ export function LicenseDetail({ id }: { id: string }) {
               <Grid container spacing={3}>
                 <Grid size={{ xs: 12, md: 6 }}><Field label="Client"><Link href={`/clients/${l.client_id}`}>{l.client_name}</Link></Field></Grid>
                 <Grid size={{ xs: 12, md: 6 }}><Field label="Product">{l.product_name}</Field></Grid>
-                <Grid size={{ xs: 6, md: 4 }}><Field label="Plan">{l.plan}</Field></Grid>
+                <Grid size={{ xs: 6, md: 4 }}><Field label="Plan"><OptionLabel table="licenses" column="plan" value={l.plan} /></Field></Grid>
                 <Grid size={{ xs: 6, md: 4 }}><Field label="Seat limit">{l.seat_limit ?? "Unlimited"}</Field></Grid>
                 <Grid size={{ xs: 12, md: 4 }}><Field label="Days remaining"><DaysRemaining expiry={l.expiry_date} status={l.status} /></Field></Grid>
                 <Grid size={{ xs: 6, md: 4 }}><Field label="Start date">{format(parseISO(l.start_date), "dd MMM yyyy")}</Field></Grid>

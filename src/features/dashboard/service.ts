@@ -20,9 +20,10 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
   if (q.from > q.to) throw new AppError("The start date is after the end date", 422, "VALIDATION_ERROR");
   const one = <T extends Record<string, unknown>>(sql: string, values: unknown[] = []) => db.queryOne<T>(sql, values);
 
-  const [clients, sales, invoiced, collected, receivables, advances, licenses, renewals, recentInvoices, expiring, activity] = await Promise.all([
-    one<{ n: string }>("SELECT count(*) AS n FROM clients WHERE archived_at IS NULL AND status = 'active'"),
+  const [clients, sales, toBill, invoiced, collected, receivables, advances, licenses, renewals, recentInvoices, expiring, activity] = await Promise.all([
+    one<{ n: string }>("SELECT count(*) AS n FROM clients WHERE archived_at IS NULL"),
     one<{ n: string; v: string | null }>("SELECT count(*) AS n, sum(total) AS v FROM sales WHERE status IN ('draft','confirmed')"),
+    one<{ v: string | null; n: string }>("SELECT sum(sb.unbilled_estimate) AS v, count(*) FILTER (WHERE sb.unbilled_estimate > 0) AS n FROM sales s JOIN sale_billing sb ON sb.sale_id = s.id WHERE s.status = 'confirmed'"),
     one<{ n: string; v: string | null }>("SELECT count(*) AS n, sum(total) AS v FROM invoices WHERE status = 'issued' AND issue_date BETWEEN $1 AND $2", [q.from, q.to]),
     one<{ n: string; v: string | null }>("SELECT count(*) AS n, sum(amount) AS v FROM payments WHERE voided_at IS NULL AND payment_date BETWEEN $1 AND $2", [q.from, q.to]),
     one<{ open_n: string; outstanding: string | null; overdue_n: string; overdue: string | null }>(
@@ -63,7 +64,7 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
   return {
     period: q,
     clients: { active: n(clients?.n) },
-    sales: { open: n(sales?.n), value: sales?.v ?? "0.00" },
+    sales: { open: n(sales?.n), value: sales?.v ?? "0.00", toBill: toBill?.v ?? "0.00", salesToBill: n(toBill?.n) },
     billing: {
       invoiced: { count: n(invoiced?.n), amount: invoiced?.v ?? "0.00" },
       collected: { count: n(collected?.n), amount: collected?.v ?? "0.00" },

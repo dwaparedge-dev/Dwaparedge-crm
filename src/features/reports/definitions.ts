@@ -98,20 +98,16 @@ export const REPORTS: ReportDef[] = [
     description: "Every client with contact details, owner and status.",
     definition: "One row per client. Archived clients are included only when you choose the Archived status.",
     filters: ["status", "search"],
-    statusOptions: [{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }, { value: "archived", label: "Archived" }],
-    columns: [text("name", "Client"), text("legal_name", "Legal name"), text("gstin", "GSTIN"), text("email", "Email"), text("phone", "Phone"), text("city", "City"), text("state", "State"), text("owner", "Owner"), text("status", "Status"), date("created", "Created")],
+    statusOptions: [{ value: "active", label: "Active" }, { value: "archived", label: "Archived" }],
+    columns: [text("name", "Client"), text("legal_name", "Legal name"), text("gstin", "GSTIN"), text("email", "Email"), text("phone", "Phone"), text("city", "City"), text("state_code", "State code"), text("owner", "Owner"), text("status", "Status"), date("created", "Created")],
     defaultSort: "name", defaultDir: "asc",
     sorts: { name: "r.name", created: "r.created", status: "r.status", city: "r.city" },
     async run(p) {
       const w = new Where();
-      if (p.status === "archived") w.raw("c.archived_at IS NOT NULL");
-      else {
-        w.raw("c.archived_at IS NULL");
-        if (p.status) w.add((x) => `c.status = ${x}`, p.status);
-      }
+      w.raw(p.status === "archived" ? "c.archived_at IS NOT NULL" : "c.archived_at IS NULL");
       if (p.search) w.add((x) => `(c.legal_name ILIKE ${x} OR c.display_name ILIKE ${x} OR c.gstin ILIKE ${x} OR c.email ILIKE ${x} OR c.city ILIKE ${x})`, likePattern(p.search));
-      const body = `SELECT c.display_name AS name, c.legal_name, c.gstin, c.email, c.phone, c.city, c.state, u.name AS owner,
-        CASE WHEN c.archived_at IS NOT NULL THEN 'Archived' WHEN c.status = 'active' THEN 'Active' ELSE 'Inactive' END AS status,
+      const body = `SELECT c.display_name AS name, c.legal_name, c.gstin, c.email, c.phone, c.city, c.state_code, u.name AS owner,
+        CASE WHEN c.archived_at IS NOT NULL THEN 'Archived' ELSE 'Active' END AS status,
         to_char(c.created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS created
         FROM clients c LEFT JOIN users u ON u.id = c.owner_id ${w.sql}`;
       const r = await paged(body, w, p, order(this, p, "r.name"));
@@ -144,13 +140,44 @@ export const REPORTS: ReportDef[] = [
     },
   },
   {
+    key: "salebilling",
+    title: "Sales: billing and collection",
+    description: "For each sale: what is billed, what is paid, what is still due and what is left to bill.",
+    definition: "Order value = the sale's total incl. GST. Billed = issued invoices against it. Paid = payments allocated to those invoices plus any advance received for the sale and not yet allocated. Due on invoices = billed minus allocated payments. Still to bill = the part of the order not yet on an issued invoice (an estimate incl. GST at the sale's rates). Balance remaining = billed + still to bill − paid. Cancelled sales are excluded.",
+    filters: ["dateRange", "client", "status", "search"], dateLabel: "Sale date",
+    statusOptions: ["draft", "confirmed", "completed"].map((s) => ({ value: s, label: s[0]!.toUpperCase() + s.slice(1) })),
+    columns: [text("number", "Sale"), text("client", "Client"), text("title", "Title"), text("status", "Status"), money("order_value", "Order value"), money("billed", "Billed"), money("paid", "Paid"), money("due", "Due on invoices"), money("advance", "Advance (unallocated)"), money("to_bill", "Still to bill"), money("balance", "Balance remaining")],
+    defaultSort: "balance", defaultDir: "desc",
+    sorts: { balance: "r.balance", number: "r.number", client: "r.client", order_value: "r.order_value", billed: "r.billed", paid: "r.paid", due: "r.due", to_bill: "r.to_bill" },
+    async run(p) {
+      const w = new Where();
+      w.raw("s.status <> 'cancelled'");
+      if (p.from) w.add((x) => `s.sale_date >= ${x}`, p.from);
+      if (p.to) w.add((x) => `s.sale_date <= ${x}`, p.to);
+      if (p.clientId) w.add((x) => `s.client_id = ${x}`, p.clientId);
+      if (p.status) w.add((x) => `s.status = ${x}`, p.status);
+      if (p.search) w.add((x) => `(s.sale_number ILIKE ${x} OR s.title ILIKE ${x} OR c.display_name ILIKE ${x})`, likePattern(p.search));
+      const from = `FROM sales s JOIN clients c ON c.id = s.client_id JOIN sale_billing sb ON sb.sale_id = s.id ${w.sql}`;
+      const body = `SELECT s.sale_number AS number, c.display_name AS client, s.title, initcap(s.status) AS status, s.total AS order_value, sb.billed_total AS billed,
+        (sb.paid_on_invoices + sb.advance) AS paid, (sb.billed_total - sb.paid_on_invoices) AS due, sb.advance, sb.unbilled_estimate AS to_bill,
+        GREATEST(sb.billed_total + sb.unbilled_estimate - sb.paid_on_invoices - sb.advance, 0.00) AS balance ${from}`;
+      const r = await paged(body, w, p, order(this, p, "r.number"));
+      const agg = await db.queryOne<{ order_value: string | null; billed: string | null; paid: string | null; due: string | null; to_bill: string | null }>(
+        `SELECT sum(s.total) AS order_value, sum(sb.billed_total) AS billed, sum(sb.paid_on_invoices + sb.advance) AS paid, sum(sb.billed_total - sb.paid_on_invoices) AS due, sum(sb.unbilled_estimate) AS to_bill ${from}`, w.values);
+      return { ...r, summary: [
+        { label: "Sales", value: String(r.total), type: "number" }, { label: "Order value", value: agg?.order_value ?? "0.00", type: "money" }, { label: "Billed", value: agg?.billed ?? "0.00", type: "money" },
+        { label: "Paid", value: agg?.paid ?? "0.00", type: "money" }, { label: "Due on invoices", value: agg?.due ?? "0.00", type: "money" }, { label: "Still to bill", value: agg?.to_bill ?? "0.00", type: "money" },
+      ] };
+    },
+  },
+  {
     key: "invoices",
     title: "Invoices",
     description: "Invoices by date and status.",
     definition: "Invoiced = total of issued invoices dated in the period (drafts and cancelled invoices are listed but never counted). Paid = payments allocated to the invoice. Balance = total minus paid, for issued invoices.",
     filters: ["dateRange", "client", "status", "search"], dateLabel: "Invoice date",
     statusOptions: [["draft", "Draft"], ["unpaid", "Unpaid"], ["partial", "Partially paid"], ["overdue", "Overdue"], ["paid", "Paid"], ["cancelled", "Cancelled"]].map(([value, label]) => ({ value: value!, label: label! })),
-    columns: [text("number", "Invoice"), text("client", "Client"), date("issue_date", "Date"), date("due_date", "Due"), text("status", "Status"), money("total", "Total"), money("paid", "Paid"), money("balance", "Balance")],
+    columns: [text("number", "Invoice"), text("sale", "Sale"), text("client", "Client"), date("issue_date", "Date"), date("due_date", "Due"), text("status", "Status"), money("total", "Total"), money("paid", "Paid"), money("balance", "Balance")],
     defaultSort: "issue_date", defaultDir: "desc",
     sorts: { issue_date: "r.issue_date", due_date: "r.due_date", number: "r.number", client: "r.client", total: "r.total", balance: "r.balance" },
     async run(p) {
@@ -165,15 +192,15 @@ export const REPORTS: ReportDef[] = [
       else if (p.status === "partial") w.raw(`i.status = 'issued' AND ${paid} > 0 AND ${paid} < i.total`);
       else if (p.status === "unpaid") w.raw(`i.status = 'issued' AND ${paid} = 0 AND i.total > 0`);
       else if (p.status === "overdue") w.raw(`i.status = 'issued' AND i.total - ${paid} > 0 AND i.due_date < ${TODAY}`);
-      const body = `SELECT COALESCE(i.invoice_number, 'Draft') AS number, c.display_name AS client, to_char(i.issue_date,'YYYY-MM-DD') AS issue_date,
+      const body = `SELECT COALESCE(i.invoice_number, 'Draft') AS number, sl.sale_number AS sale, c.display_name AS client, to_char(i.issue_date,'YYYY-MM-DD') AS issue_date,
         to_char(i.due_date,'YYYY-MM-DD') AS due_date, ${INVOICE_STATUS_SQL("i", paid)} AS status, i.total,
         CASE WHEN i.status = 'issued' THEN ${paid} ELSE NULL END AS paid,
         CASE WHEN i.status = 'issued' THEN i.total - ${paid} ELSE NULL END AS balance
-        FROM invoices i JOIN clients c ON c.id = i.client_id ${w.sql}`;
+        FROM invoices i JOIN clients c ON c.id = i.client_id JOIN sales sl ON sl.id = i.sale_id ${w.sql}`;
       const r = await paged(body, w, p, order(this, p, "r.number"));
       const agg = await db.queryOne<{ invoiced: string | null; outstanding: string | null }>(
         `SELECT sum(i.total) FILTER (WHERE i.status = 'issued') AS invoiced, sum(i.total - ${paid}) FILTER (WHERE i.status = 'issued') AS outstanding
-         FROM invoices i JOIN clients c ON c.id = i.client_id ${w.sql}`, w.values);
+         FROM invoices i JOIN clients c ON c.id = i.client_id JOIN sales sl ON sl.id = i.sale_id ${w.sql}`, w.values);
       return { ...r, summary: [{ label: "Invoices listed", value: String(r.total), type: "number" }, { label: "Invoiced (issued)", value: agg?.invoiced ?? "0.00", type: "money" }, { label: "Outstanding on these", value: agg?.outstanding ?? "0.00", type: "money" }] };
     },
   },
@@ -319,7 +346,7 @@ export const REPORTS: ReportDef[] = [
           SELECT to_char(date,'YYYY-MM-DD') AS date, kind, document, detail, debit, credit, sort_key,
                  sum(debit - credit) OVER (ORDER BY sort_key, document ROWS UNBOUNDED PRECEDING) AS balance, date AS d
           FROM (
-            SELECT i.issue_date AS date, 'Invoice' AS kind, i.invoice_number AS document, initcap(replace(i.invoice_type,'_',' ')) AS detail, i.total AS debit, 0::numeric AS credit,
+            SELECT i.issue_date AS date, 'Invoice' AS kind, i.invoice_number AS document, (SELECT sl.sale_number FROM sales sl WHERE sl.id = i.sale_id) AS detail, i.total AS debit, 0::numeric AS credit,
                    (i.issue_date::text || '1' || lpad(extract(epoch from i.issued_at)::bigint::text, 12, '0')) AS sort_key, i.client_id
               FROM invoices i WHERE i.status = 'issued'
             UNION ALL

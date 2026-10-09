@@ -11,6 +11,8 @@ beforeAll(async () => {
   actor = (await makeUser()).id;
   client = await makeClient(actor);
   product = await makeProduct();
+  const { addOption } = await import("@/features/options/service");
+  await addOption("licenses", "plan", "Standard", actor);
 });
 afterAll(async () => tdb?.drop());
 
@@ -91,10 +93,10 @@ describe("license lifecycle", () => {
     expect(r.total).toBe(1);
     expect(r.renewalValue).toBe("2500.00");
   });
-  it("is append-only: history rows reference licenses that cannot vanish", async () => {
+  it("cannot be deleted (revoke instead)", async () => {
     const { db } = await import("@/lib/db");
     const id = await license();
-    await expect(db.query("DELETE FROM licenses WHERE id = $1", [id])).rejects.toThrow(/foreign key/);
+    await expect(db.query("DELETE FROM licenses WHERE id = $1", [id])).rejects.toThrow(/cannot be deleted/);
   });
 });
 

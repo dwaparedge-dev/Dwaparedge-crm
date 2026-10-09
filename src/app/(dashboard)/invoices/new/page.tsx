@@ -1,6 +1,6 @@
-import { InvoiceFormPage } from "@/features/invoices/components/InvoiceFormPage";
+import { NewInvoicePage } from "@/features/invoices/components/NewInvoicePage";
 
 export default async function Page({ searchParams }: PageProps<"/invoices/new">) {
-  const { clientId } = await searchParams;
-  return <InvoiceFormPage clientId={typeof clientId === "string" ? clientId : undefined} />;
+  const { saleId, clientId } = await searchParams;
+  return <NewInvoicePage saleId={typeof saleId === "string" ? saleId : undefined} clientId={typeof clientId === "string" ? clientId : undefined} />;
 }

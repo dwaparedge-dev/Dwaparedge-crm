@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -33,7 +33,7 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/state
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
-import { PRODUCT_TYPES, PRODUCT_TYPE_LABELS } from "../schema";
+import { OptionFilter, OptionLabel, OptionSelect } from "@/features/options/components/OptionSelect";
 import type { ProductRow } from "../service";
 
 interface FormValues {
@@ -44,21 +44,19 @@ interface FormValues {
   hsnSac: string;
   defaultPrice: string;
   gstRate: string;
-  isTaxExempt: boolean;
   isActive: boolean;
 }
-const EMPTY: FormValues = { name: "", sku: "", type: "software_license", description: "", hsnSac: "", defaultPrice: "0", gstRate: "18", isTaxExempt: false, isActive: true };
+const EMPTY: FormValues = { name: "", sku: "", type: "software_license", description: "", hsnSac: "", defaultPrice: "0", gstRate: "18", isActive: true };
 
 function ProductDialog({ product, open, onClose, onSaved }: { product: ProductRow | null; open: boolean; onClose: () => void; onSaved: () => void }) {
   const notify = useNotify();
   const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = useForm<FormValues>({
     defaultValues: product
       ? { name: product.name, sku: product.sku ?? "", type: product.type, description: product.description ?? "", hsnSac: product.hsn_sac ?? "",
-          defaultPrice: product.default_price, gstRate: product.gst_rate, isTaxExempt: product.is_tax_exempt, isActive: product.is_active }
+          defaultPrice: product.default_price, gstRate: product.gst_rate, isActive: product.is_active }
       : EMPTY,
   });
   const [formError, setFormError] = useState<string | null>(null);
-  const exempt = useWatch({ control, name: "isTaxExempt" });
 
   async function submit(values: FormValues) {
     setFormError(null);
@@ -91,10 +89,8 @@ function ProductDialog({ product, open, onClose, onSaved }: { product: ProductRo
             <Grid size={{ xs: 12, sm: 8 }}><TextField label="Name" required fullWidth autoFocus {...register("name", { required: "Name is required" })} {...f("name")} /></Grid>
             <Grid size={{ xs: 12, sm: 4 }}><TextField label="SKU" fullWidth {...register("sku")} {...f("sku")} /></Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <Controller name="type" control={control} render={({ field }) => (
-                <TextField select label="Type" fullWidth {...field} {...f("type")}>
-                  {PRODUCT_TYPES.map((t) => <MenuItem key={t} value={t}>{PRODUCT_TYPE_LABELS[t]}</MenuItem>)}
-                </TextField>
+              <Controller name="type" control={control} rules={{ required: "Select a type" }} render={({ field, fieldState }) => (
+                <OptionSelect table="products" column="type" label="Type" required value={field.value} onChange={field.onChange} error={fieldState.error?.message} />
               )} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}><TextField label="HSN / SAC code" fullWidth {...register("hsnSac")} {...f("hsnSac")} /></Grid>
@@ -103,12 +99,11 @@ function ProductDialog({ product, open, onClose, onSaved }: { product: ProductRo
                 {...register("defaultPrice", { required: "Price is required", pattern: { value: /^\d+(\.\d{1,2})?$/, message: "Use a number with up to 2 decimals" } })} {...f("defaultPrice")} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="GST rate" fullWidth inputMode="decimal" disabled={exempt} slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }}
-                {...register("gstRate", { pattern: { value: /^\d+(\.\d{1,2})?$/, message: "Use a number with up to 2 decimals" } })} {...f("gstRate")} />
+              <TextField label="GST rate" fullWidth inputMode="decimal" slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> } }}
+                {...register("gstRate", { pattern: { value: /^\d+(\.\d{1,2})?$/, message: "Use a number with up to 2 decimals" } })} {...f("gstRate")} helperText={errors.gstRate?.message ?? "Use 0 for exempt supplies"} />
             </Grid>
             <Grid size={12}><TextField label="Description" multiline minRows={2} fullWidth {...register("description")} {...f("description")} /></Grid>
             <Grid size={12}>
-              <FormControlLabel control={<Checkbox {...register("isTaxExempt")} defaultChecked={product?.is_tax_exempt ?? false} />} label="Tax exempt (no GST)" />
               <FormControlLabel control={<Checkbox {...register("isActive")} defaultChecked={product?.is_active ?? true} />} label="Active (available for new sales)" />
             </Grid>
           </Grid>
@@ -157,10 +152,7 @@ export function ProductsPage() {
         <Box sx={{ p: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
           <TextField size="small" placeholder="Search name, SKU, description" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ flex: "1 1 260px", maxWidth: 420 }}
             slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }, htmlInput: { "aria-label": "Search products" } }} />
-          <TextField select size="small" label="Type" value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} sx={{ minWidth: 200 }}>
-            <MenuItem value="">All types</MenuItem>
-            {PRODUCT_TYPES.map((t) => <MenuItem key={t} value={t}>{PRODUCT_TYPE_LABELS[t]}</MenuItem>)}
-          </TextField>
+          <OptionFilter table="products" column="type" label="Type" value={type} onChange={(v) => { setType(v); setPage(0); }} minWidth={200} />
           <TextField select size="small" label="Status" value={active} onChange={(e) => { setActive(e.target.value); setPage(0); }} sx={{ minWidth: 140 }}>
             <MenuItem value="">All</MenuItem>
             <MenuItem value="true">Active</MenuItem>
@@ -189,10 +181,10 @@ export function ProductsPage() {
                           <Box sx={{ fontWeight: 600 }}>{p.name}</Box>
                           {p.sku && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{p.sku}</Box>}
                         </TableCell>
-                        <TableCell>{PRODUCT_TYPE_LABELS[p.type as keyof typeof PRODUCT_TYPE_LABELS] ?? p.type}</TableCell>
+                        <TableCell><OptionLabel table="products" column="type" value={p.type} /></TableCell>
                         <TableCell>{p.hsn_sac ?? "—"}</TableCell>
-                        <TableCell align="right">{formatMoney(p.default_price, p.currency)}</TableCell>
-                        <TableCell align="right">{p.is_tax_exempt ? "Exempt" : `${Number(p.gst_rate)}%`}</TableCell>
+                        <TableCell align="right">{formatMoney(p.default_price)}</TableCell>
+                        <TableCell align="right">{Number(p.gst_rate) === 0 ? "Exempt" : `${Number(p.gst_rate)}%`}</TableCell>
                         <TableCell><Chip size="small" variant="outlined" label={p.is_active ? "Active" : "Inactive"} color={p.is_active ? "success" : "default"} /></TableCell>
                         <TableCell align="right"><IconButton aria-label={`Edit ${p.name}`} onClick={() => show(p)}><EditIcon fontSize="small" /></IconButton></TableCell>
                       </TableRow>

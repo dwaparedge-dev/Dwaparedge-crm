@@ -33,11 +33,13 @@ interface Props {
   values: Record<string, string>;
   onChange: (values: Record<string, string>) => void;
   focusInvoiceId?: string;
+  /** Only list this sale's invoices. */
+  saleId?: string;
 }
 
 /** Lets the user split a payment across the client's open invoices. */
-export function AllocationGrid({ clientId, available, values, onChange, focusInvoiceId }: Props) {
-  const { data, loading, error } = useFetch<{ items: InvoiceRow[] }>(`/api/invoices?clientId=${clientId}&openOnly=true&pageSize=100`);
+export function AllocationGrid({ clientId, available, values, onChange, focusInvoiceId, saleId }: Props) {
+  const { data, loading, error } = useFetch<{ items: InvoiceRow[] }>(`/api/invoices?clientId=${clientId}&openOnly=true&pageSize=100${saleId ? `&saleId=${saleId}` : ""}`);
   const remaining = parseScaled(available || "0", 2) - sumAllocations(values);
 
   function autoAllocate() {
@@ -55,7 +57,7 @@ export function AllocationGrid({ clientId, available, values, onChange, focusInv
 
   if (loading) return <TableSkeleton rows={3} cols={4} />;
   if (error) return <Typography color="error">{error}</Typography>;
-  if (!data || data.items.length === 0) return <EmptyState title="No open invoices for this client" hint="The payment will be recorded as an advance and can be allocated later." />;
+  if (!data || data.items.length === 0) return <EmptyState title={saleId ? "No issued invoice with a balance on this sale" : "No open invoices for this client"} hint={saleId ? "The payment will be held as this sale's advance and can be applied when an invoice is issued." : "The payment will be recorded as an advance and can be allocated later."} />;
 
   return (
     <Box>

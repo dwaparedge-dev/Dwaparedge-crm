@@ -24,22 +24,20 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/state
 import { useFetch } from "@/components/common/useFetch";
 import type { ClientRow } from "../service";
 
-type SortKey = "name" | "created" | "status";
+type SortKey = "name" | "created";
 interface ListResponse {
   items: ClientRow[];
   total: number;
 }
 
-export function StatusChip({ status, archived }: { status: string; archived?: boolean }) {
-  if (archived) return <Chip size="small" label="Archived" />;
-  return <Chip size="small" label={status === "active" ? "Active" : "Inactive"} color={status === "active" ? "success" : "default"} variant="outlined" />;
+export function StatusChip({ archived }: { archived?: boolean }) {
+  return archived ? <Chip size="small" label="Archived" /> : <Chip size="small" label="Active" color="success" variant="outlined" />;
 }
 
 export function ClientsList() {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [status, setStatus] = useState("");
   const [archived, setArchived] = useState("false");
   const [sort, setSort] = useState<SortKey>("name");
   const [dir, setDir] = useState<"asc" | "desc">("asc");
@@ -56,7 +54,6 @@ export function ClientsList() {
 
   const qs = new URLSearchParams({ page: String(page + 1), pageSize: String(pageSize), sort, dir, archived });
   if (debounced) qs.set("search", debounced);
-  if (status) qs.set("status", status);
   const { data, error, loading, reload } = useFetch<ListResponse>(`/api/clients?${qs}`);
 
   const toggleSort = (key: SortKey) => {
@@ -89,11 +86,6 @@ export function ClientsList() {
               htmlInput: { "aria-label": "Search clients" },
             }}
           />
-          <TextField select size="small" label="Status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(0); }} sx={{ minWidth: 140 }}>
-            <MenuItem value="">All</MenuItem>
-            <MenuItem value="active">Active</MenuItem>
-            <MenuItem value="inactive">Inactive</MenuItem>
-          </TextField>
           <TextField select size="small" label="Show" value={archived} onChange={(e) => { setArchived(e.target.value); setPage(0); }} sx={{ minWidth: 140 }}>
             <MenuItem value="false">Current</MenuItem>
             <MenuItem value="true">Archived</MenuItem>
@@ -106,9 +98,9 @@ export function ClientsList() {
           <TableSkeleton />
         ) : data && data.items.length === 0 ? (
           <EmptyState
-            title={debounced || status ? "No clients match your filters" : archived === "true" ? "No archived clients" : "No clients yet"}
-            hint={debounced || status ? "Try a different search or clear the filters." : "Add your first client to get started."}
-            action={!debounced && !status && archived === "false" ? <Button component={Link} href="/clients/new" variant="contained">Add client</Button> : undefined}
+            title={debounced ? "No clients match your filters" : archived === "true" ? "No archived clients" : "No clients yet"}
+            hint={debounced ? "Try a different search or clear the filters." : "Add your first client to get started."}
+            action={!debounced && archived === "false" ? <Button component={Link} href="/clients/new" variant="contained">Add client</Button> : undefined}
           />
         ) : (
           <>
@@ -122,9 +114,7 @@ export function ClientsList() {
                     <TableCell>GSTIN</TableCell>
                     <TableCell>Contact</TableCell>
                     <TableCell>Owner</TableCell>
-                    <TableCell sortDirection={sort === "status" ? dir : false}>
-                      <TableSortLabel active={sort === "status"} direction={dir} onClick={() => toggleSort("status")}>Status</TableSortLabel>
-                    </TableCell>
+                    <TableCell>Status</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -142,7 +132,7 @@ export function ClientsList() {
                         {c.phone && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{c.phone}</Box>}
                       </TableCell>
                       <TableCell>{c.owner_name ?? "—"}</TableCell>
-                      <TableCell><StatusChip status={c.status} archived={c.archived_at !== null} /></TableCell>
+                      <TableCell><StatusChip archived={c.archived_at !== null} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

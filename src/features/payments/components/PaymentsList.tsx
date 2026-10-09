@@ -24,11 +24,12 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
 import { formatMoney } from "@/lib/format";
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "../schema";
+import { OptionFilter, OptionLabel } from "@/features/options/components/OptionSelect";
 import type { PaymentRow } from "../service";
 import { RecordPaymentDialog } from "./RecordPaymentDialog";
 
-export function PaymentsList({ clientId }: { clientId?: string }) {
+export function PaymentsList({ clientId, saleId, saleNumber, suggestedAmount, onChanged }: { clientId?: string; saleId?: string; saleNumber?: string; suggestedAmount?: string; onChanged?: () => void }) {
+  const scoped = Boolean(clientId || saleId);
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -44,29 +45,27 @@ export function PaymentsList({ clientId }: { clientId?: string }) {
   }, [search]);
 
   const qs = new URLSearchParams({ page: String(page + 1), pageSize: String(pageSize), includeVoided: String(voided) });
-  if (clientId) qs.set("clientId", clientId);
+  if (clientId && !saleId) qs.set("clientId", clientId);
+  if (saleId) qs.set("saleId", saleId);
   if (debounced) qs.set("search", debounced);
   if (method) qs.set("method", method);
   const { data, error, loading, reload } = useFetch<{ items: PaymentRow[]; total: number; totals: { collected: string; unallocated: string } }>(`/api/payments?${qs}`);
   const filtered = Boolean(debounced || method);
 
   const body = (
-    <Card variant={clientId ? "elevation" : "outlined"} elevation={0} sx={clientId ? { border: 0 } : undefined}>
-      <Box sx={{ p: clientId ? 0 : 2, pb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
+    <Card variant={scoped ? "elevation" : "outlined"} elevation={0} sx={scoped ? { border: 0 } : undefined}>
+      <Box sx={{ p: scoped ? 0 : 2, pb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
         <TextField size="small" placeholder="Search receipt, reference or client" value={search} onChange={(e) => setSearch(e.target.value)} sx={{ flex: "1 1 240px", maxWidth: 380 }}
           slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }, htmlInput: { "aria-label": "Search payments" } }} />
-        <TextField select size="small" label="Method" value={method} onChange={(e) => { setMethod(e.target.value); setPage(0); }} sx={{ minWidth: 160 }}>
-          <MenuItem value="">All methods</MenuItem>
-          {PAYMENT_METHODS.map((m) => <MenuItem key={m} value={m}>{PAYMENT_METHOD_LABELS[m]}</MenuItem>)}
-        </TextField>
+        <OptionFilter table="payments" column="method" label="Method" value={method} onChange={(v) => { setMethod(v); setPage(0); }} />
         <TextField select size="small" label="Voided" value={String(voided)} onChange={(e) => { setVoided(e.target.value === "true"); setPage(0); }} sx={{ minWidth: 150 }}>
           <MenuItem value="false">Hide voided</MenuItem>
           <MenuItem value="true">Include voided</MenuItem>
         </TextField>
-        {clientId && <Box sx={{ ml: "auto" }}><Button variant="contained" startIcon={<AddIcon />} onClick={() => setRecording(true)}>Record payment</Button></Box>}
+        {scoped && <Box sx={{ ml: "auto" }}><Button variant="contained" startIcon={<AddIcon />} onClick={() => setRecording(true)}>Record payment</Button></Box>}
       </Box>
       {data && data.total > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ px: clientId ? 0 : 2, pb: 1.5 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ px: scoped ? 0 : 2, pb: 1.5 }}>
           Collected (payments received, not voided): <strong>{formatMoney(data.totals.collected)}</strong> · Not yet allocated to invoices (advances): <strong>{formatMoney(data.totals.unallocated)}</strong>
         </Typography>
       )}
@@ -81,8 +80,8 @@ export function PaymentsList({ clientId }: { clientId?: string }) {
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>Receipt</TableCell>{!clientId && <TableCell>Client</TableCell>}<TableCell>Date</TableCell><TableCell>Method</TableCell>
-                    <TableCell align="right">Amount</TableCell><TableCell align="right">Unallocated</TableCell>
+                    <TableCell>Receipt</TableCell>{!scoped && <TableCell>Client</TableCell>}<TableCell>Date</TableCell><TableCell>Method</TableCell>
+                    <TableCell align="right">Amount</TableCell>{saleId && <TableCell align="right">Applied to this sale</TableCell>}<TableCell align="right">Unallocated</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -93,10 +92,11 @@ export function PaymentsList({ clientId }: { clientId?: string }) {
                         {p.voided_at && <Chip size="small" label="Voided" sx={{ ml: 1 }} />}
                         {p.reference && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{p.reference}</Box>}
                       </TableCell>
-                      {!clientId && <TableCell>{p.client_name}</TableCell>}
+                      {!scoped && <TableCell>{p.client_name}</TableCell>}
                       <TableCell>{format(parseISO(p.payment_date), "dd MMM yyyy")}</TableCell>
-                      <TableCell>{PAYMENT_METHOD_LABELS[p.method as keyof typeof PAYMENT_METHOD_LABELS] ?? p.method}</TableCell>
+                      <TableCell><OptionLabel table="payments" column="method" value={p.method} /></TableCell>
                       <TableCell align="right">{formatMoney(p.amount)}</TableCell>
+                      {saleId && <TableCell align="right">{formatMoney(p.applied_to_sale ?? "0")}</TableCell>}
                       <TableCell align="right">{p.voided_at ? "—" : formatMoney(p.unallocated)}</TableCell>
                     </TableRow>
                   ))}
@@ -107,11 +107,11 @@ export function PaymentsList({ clientId }: { clientId?: string }) {
               onPageChange={(_, p) => setPage(p)} onRowsPerPageChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }} />
           </>
         )}
-      {recording && <RecordPaymentDialog clientId={clientId} onClose={() => setRecording(false)} onSaved={(id) => { setRecording(false); router.push(`/payments/${id}`); }} />}
+      {recording && <RecordPaymentDialog clientId={clientId} saleId={saleId} saleNumber={saleNumber} suggestedAmount={suggestedAmount} onClose={() => setRecording(false)} onSaved={(id) => { setRecording(false); if (saleId) { reload(); onChanged?.(); } else router.push(`/payments/${id}`); }} />}
     </Card>
   );
 
-  if (clientId) return body;
+  if (scoped) return body;
   return (
     <>
       <PageHeader title="Payments" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Payments" }]}

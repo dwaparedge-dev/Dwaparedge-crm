@@ -2,49 +2,52 @@
 import { useRouter } from "next/navigation";
 import Skeleton from "@mui/material/Skeleton";
 import { useNotify } from "@/components/common/Notify";
+import { sumAmounts } from "@/lib/money";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
-import type { CompanySettings } from "@/features/settings/service";
+import type { MilestoneRow, SaleItemRow, SaleRow } from "@/features/sales/service";
 import type { InvoiceItemRow, InvoiceRow } from "../service";
-import { InvoiceForm, emptyInvoice, type InvoiceFormValues } from "./InvoiceForm";
+import { InvoiceForm, type InvoiceFormValues } from "./InvoiceForm";
 
 type Detail = InvoiceRow & { items: InvoiceItemRow[] };
+type SaleDetail = SaleRow & { items: SaleItemRow[]; milestones: MilestoneRow[] };
 
 const toForm = (i: Detail): InvoiceFormValues => ({
-  clientId: i.client_id, invoiceType: i.invoice_type, issueDate: i.issue_date, dueDate: i.due_date, placeOfSupplyStateCode: i.place_of_supply_state_code ?? "",
+  saleId: i.sale_id, issueDate: i.issue_date, dueDate: i.due_date, placeOfSupplyStateCode: i.place_of_supply_state_code ?? "",
   paymentTerms: i.payment_terms ?? "", notes: i.notes ?? "",
   items: i.items.map((x) => ({
-    productId: x.product_id ?? "", description: x.description, hsnSac: x.hsn_sac ?? "", quantity: String(Number(x.quantity)), unitPrice: x.unit_price,
+    saleItemId: x.sale_item_id, productId: x.product_id ?? "", description: x.description, hsnSac: x.hsn_sac ?? "", quantity: String(Number(x.quantity)), unitPrice: x.unit_price,
     discountPercent: String(Number(x.discount_percent)), taxRate: String(Number(x.tax_rate)),
   })),
 });
 
-export function InvoiceFormPage({ invoiceId, clientId }: { invoiceId?: string; clientId?: string }) {
+export function InvoiceFormPage({ invoiceId }: { invoiceId: string }) {
   const router = useRouter();
   const notify = useNotify();
-  const inv = useFetch<Detail>(invoiceId ? `/api/invoices/${invoiceId}` : null);
-  const settings = useFetch<CompanySettings>("/api/settings");
-  const back = invoiceId ? `/invoices/${invoiceId}` : clientId ? `/clients/${clientId}` : "/invoices";
-  const error = inv.error ?? settings.error;
-  const ready = (!invoiceId || inv.data) && settings.data;
+  const inv = useFetch<Detail>(`/api/invoices/${invoiceId}`);
+  const sale = useFetch<SaleDetail>(inv.data ? `/api/sales/${inv.data.sale_id}` : null);
+  const back = `/invoices/${invoiceId}`;
+  const error = inv.error ?? sale.error;
+
+  const ownTaxable: Record<string, string> = {};
+  for (const l of inv.data?.items ?? []) ownTaxable[l.sale_item_id] = sumAmounts([ownTaxable[l.sale_item_id] ?? "0", l.taxable_amount]);
 
   return (
     <>
-      <PageHeader title={invoiceId ? "Edit draft invoice" : "New invoice"} crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices", href: "/invoices" }, { label: invoiceId ? "Edit draft" : "New" }]} />
-      {error ? <ErrorState message={error} onRetry={() => { inv.reload(); settings.reload(); }} />
-        : !ready ? <Skeleton variant="rounded" height={420} />
-        : inv.data && inv.data.status !== "draft" ? <ErrorState message="Only draft invoices can be edited." />
+      <PageHeader title="Edit draft invoice" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Invoices", href: "/invoices" }, { label: "Edit draft" }]} />
+      {error ? <ErrorState message={error} onRetry={() => { inv.reload(); sale.reload(); }} />
+        : !inv.data || !sale.data ? <Skeleton variant="rounded" height={420} />
+        : inv.data.status !== "draft" ? <ErrorState message="Only draft invoices can be edited." />
         : (
           <InvoiceForm
-            initial={inv.data ? toForm(inv.data) : emptyInvoice(clientId, settings.data!.default_due_days, settings.data!.default_payment_terms ?? "", settings.data!.default_invoice_notes ?? "")}
+            initial={toForm(inv.data)}
             invoiceId={invoiceId}
+            saleNumber={sale.data.sale_number}
+            saleItems={sale.data.items}
+            ownTaxable={ownTaxable}
             onCancel={() => router.push(back)}
-            onSaved={(id) => {
-              notify.success("Draft saved");
-              router.push(`/invoices/${id}`);
-              router.refresh();
-            }}
+            onSaved={(id) => { notify.success("Draft saved"); router.push(`/invoices/${id}`); router.refresh(); }}
           />
         )}
     </>

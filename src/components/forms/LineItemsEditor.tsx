@@ -18,6 +18,10 @@ import { computeLine, sumAmounts } from "@/lib/money";
 import type { ProductRow } from "@/features/products/service";
 
 export interface LineItem {
+  /** Set for items that already exist on the saved sale (keeps their identity for invoicing). */
+  itemId?: string;
+  /** Taxable amount already on invoices (read-only hint; not sent). */
+  billed?: string;
   productId: string;
   description: string;
   hsnSac: string;
@@ -69,7 +73,7 @@ export function LineItemsEditor({ form, initialItems, totalLabel, footnote }: Pr
     setValue(`items.${idx}.description`, p.name);
     setValue(`items.${idx}.hsnSac`, p.hsn_sac ?? "");
     setValue(`items.${idx}.unitPrice`, p.default_price);
-    setValue(`items.${idx}.taxRate`, p.is_tax_exempt ? "0" : String(Number(p.gst_rate)));
+    setValue(`items.${idx}.taxRate`, String(Number(p.gst_rate)));
   }
   const num = { pattern: { value: /^\d+(\.\d+)?$/, message: "Enter a number" } };
 
@@ -113,9 +117,10 @@ export function LineItemsEditor({ form, initialItems, totalLabel, footnote }: Pr
               <Grid size={{ xs: 10, md: 2 }} sx={{ textAlign: "right", pt: { md: 1 } }}>
                 <Typography variant="caption" color="text.secondary">Line total</Typography>
                 <Typography sx={{ fontWeight: 600 }}>{line ? formatMoney(line.total) : "—"}</Typography>
+                {Number(items?.[idx]?.billed ?? 0) > 0 && <Typography variant="caption" color="warning.main" component="div">{formatMoney(items![idx]!.billed!)} already invoiced (before GST): this line can’t go below that or be removed</Typography>}
               </Grid>
               <Grid size={{ xs: 2, md: 1 }} sx={{ textAlign: "right" }}>
-                <IconButton aria-label={`Remove item ${idx + 1}`} disabled={fields.length === 1} onClick={() => remove(idx)}><DeleteIcon /></IconButton>
+                <IconButton aria-label={`Remove item ${idx + 1}`} disabled={fields.length === 1 || Number(items?.[idx]?.billed ?? 0) > 0} onClick={() => remove(idx)}><DeleteIcon /></IconButton>
               </Grid>
             </Grid>
           </Box>

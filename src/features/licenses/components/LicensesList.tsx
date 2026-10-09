@@ -25,6 +25,7 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/state
 import { useFetch } from "@/components/common/useFetch";
 import { formatMoney } from "@/lib/format";
 import { LICENSE_STATUSES } from "../schema";
+import { OptionLabel } from "@/features/options/components/OptionSelect";
 import type { LicenseRow } from "../service";
 import type { ProductRow } from "@/features/products/service";
 import { DaysRemaining, LicenseStatusChip } from "./common";
@@ -117,7 +118,7 @@ export function LicensesList({ clientId }: { clientId?: string }) {
                         {l.seat_limit && <Box sx={{ color: "text.secondary", fontSize: 12 }}>{l.seat_limit} seat{l.seat_limit === 1 ? "" : "s"}</Box>}
                       </TableCell>
                       {!clientId && <TableCell>{l.client_name}</TableCell>}
-                      <TableCell>{l.product_name}<Box sx={{ color: "text.secondary", fontSize: 13 }}>{l.plan}</Box></TableCell>
+                      <TableCell>{l.product_name}<Box sx={{ color: "text.secondary", fontSize: 13 }}><OptionLabel table="licenses" column="plan" value={l.plan} /></Box></TableCell>
                       <TableCell>{format(new Date(l.expiry_date), "dd MMM yyyy")}</TableCell>
                       <TableCell><DaysRemaining expiry={l.expiry_date} status={l.status} /></TableCell>
                       <TableCell align="right">{formatMoney(l.renewal_price)}</TableCell>

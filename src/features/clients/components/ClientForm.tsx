@@ -29,14 +29,13 @@ export interface ClientFormValues {
   stateCode: string;
   postalCode: string;
   country: string;
-  status: "active" | "inactive";
   ownerId: string;
   notes: string;
 }
 
 export const EMPTY_CLIENT: ClientFormValues = {
   legalName: "", displayName: "", gstin: "", pan: "", email: "", phone: "", billingAddress: "", shippingAddress: "",
-  city: "", stateCode: "", postalCode: "", country: "India", status: "active", ownerId: "", notes: "",
+  city: "", stateCode: "", postalCode: "", country: "India", ownerId: "", notes: "",
 };
 
 interface Props {
@@ -174,18 +173,6 @@ export function ClientForm({ initial = EMPTY_CLIENT, clientId, onSaved, onCancel
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>Account</Typography>
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, md: 6 }}>
-              <Controller
-                name="status"
-                control={control}
-                render={({ field }) => (
-                  <TextField select label="Status" fullWidth {...field}>
-                    <MenuItem value="active">Active</MenuItem>
-                    <MenuItem value="inactive">Inactive</MenuItem>
-                  </TextField>
-                )}
-              />
-            </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <Controller
                 name="ownerId"

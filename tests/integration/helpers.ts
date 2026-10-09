@@ -95,13 +95,42 @@ export async function makeProduct(over: Record<string, unknown> = {}) {
 
 export const LINE = (price = "1000", rate = "18", qty = "1") => ({ description: "Work", quantity: qty, unitPrice: price, taxRate: rate });
 
-/** Creates and issues an invoice; returns its id and number. */
-export async function issuedInvoice(actorId: string, clientId: string, price = "1000", rate = "18", issueDate = "2026-10-05", dueDate = "2026-10-20") {
-  const { createDraft, issueInvoice } = await import("@/features/invoices/service");
+/** A confirmed sale with the given lines (default: one line of 1000 at 18%). */
+export async function confirmedSale(actorId: string, clientId: string, items: Record<string, unknown>[] = [LINE()], over: Record<string, unknown> = {}) {
+  const { createSale, setSaleStatus } = await import("@/features/sales/service");
+  const { saleInputSchema } = await import("@/features/sales/schema");
+  const id = await createSale(saleInputSchema.parse({ clientId, type: "service", title: uniq("Sale"), saleDate: "2026-10-05", items, ...over }), actorId);
+  await setSaleStatus(id, "confirmed", actorId);
+  return id;
+}
+
+export const bill = async (actorId: string, saleId: string, request: Record<string, unknown> = { mode: "rest" }) => {
+  const { createDraftForSale } = await import("@/features/invoices/service");
+  const { billSaleSchema } = await import("@/features/sales/schema");
+  return createDraftForSale(saleId, billSaleSchema.parse(request), actorId);
+};
+
+/** Re-saves a draft with changed dates / place of supply / lines. */
+export async function patchDraft(actorId: string, invoiceId: string, patch: Record<string, unknown>) {
+  const { getInvoice, updateDraft } = await import("@/features/invoices/service");
   const { invoiceInputSchema } = await import("@/features/invoices/schema");
-  const id = await createDraft(invoiceInputSchema.parse({ clientId, invoiceType: "service", issueDate, dueDate, items: [LINE(price, rate)] }), actorId);
+  const inv = await getInvoice(invoiceId);
+  const base = {
+    saleId: inv.sale_id, issueDate: inv.issue_date, dueDate: inv.due_date, placeOfSupplyStateCode: inv.place_of_supply_state_code ?? "",
+    paymentTerms: inv.payment_terms ?? "", notes: inv.notes ?? "",
+    items: inv.items.map((i) => ({ saleItemId: i.sale_item_id, productId: i.product_id ?? "", description: i.description, hsnSac: i.hsn_sac ?? "", quantity: i.quantity, unitPrice: i.unit_price, discountPercent: i.discount_percent, taxRate: i.tax_rate })),
+  };
+  await updateDraft(invoiceId, invoiceInputSchema.parse({ ...base, ...patch }), actorId);
+}
+
+/** Creates a sale, bills all of it, optionally redates the draft, and issues it. */
+export async function issuedInvoice(actorId: string, clientId: string, price = "1000", rate = "18", issueDate = "2026-10-05", dueDate = "2026-10-20") {
+  const { issueInvoice } = await import("@/features/invoices/service");
+  const saleId = await confirmedSale(actorId, clientId, [LINE(price, rate)]);
+  const id = await bill(actorId, saleId);
+  await patchDraft(actorId, id, { issueDate, dueDate });
   const number = await issueInvoice(id, actorId);
-  return { id, number };
+  return { id, number, saleId };
 }
 
 export async function expectAppError(p: Promise<unknown>, status: number, code?: string, message?: RegExp) {

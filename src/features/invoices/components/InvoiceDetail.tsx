@@ -26,10 +26,9 @@ import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
 import { stateNameByCode } from "@/lib/india";
-import { PAYMENT_METHOD_LABELS } from "@/features/payments/schema";
+import { OptionLabel } from "@/features/options/components/OptionSelect";
 import { RecordPaymentDialog } from "@/features/payments/components/RecordPaymentDialog";
 import type { InvoiceItemRow, InvoiceRow } from "../service";
-import { INVOICE_TYPE_LABELS } from "../schema";
 import { InvoiceStatusChip } from "./common";
 
 type Allocation = { id: string; payment_id: string; receipt_number: string; payment_date: string; method: string; amount: string; reversed_at: string | null };
@@ -54,6 +53,7 @@ export function InvoiceDetail({ id }: { id: string }) {
   const router = useRouter();
   const notify = useNotify();
   const { data: inv, error, loading, reload } = useFetch<Detail>(`/api/invoices/${id}`);
+  const sale = useFetch<{ advance: string; sale_number: string }>(inv ? `/api/sales/${inv.sale_id}` : null);
   const [dialog, setDialog] = useState<"issue" | "cancel" | "delete" | "pay" | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -74,6 +74,19 @@ export function InvoiceDetail({ id }: { id: string }) {
     } catch (e) {
       setDialog(null);
       notify.error(e instanceof Error ? e.message : "Could not issue the invoice");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyAdvance() {
+    setBusy(true);
+    try {
+      const r = await api<{ applied: string }>(`/api/sales/${inv!.sale_id}/apply-advance`, { method: "POST", body: { invoiceId: id } });
+      notify.success(`${formatMoney(r.applied)} of the sale's advance applied to this invoice`);
+      reload();
+      sale.reload();
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : "Could not apply the advance");
     } finally {
       setBusy(false);
     }
@@ -115,6 +128,11 @@ export function InvoiceDetail({ id }: { id: string }) {
           </>
         }
       />
+      {inv.status === "issued" && Number(sale.data?.advance ?? 0) > 0 && Number(inv.balance_due) > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={applyAdvance} disabled={busy}>Apply advance</Button>}>
+          {formatMoney(sale.data!.advance)} was received in advance for sale {inv.sale_number}. Apply it to this invoice.
+        </Alert>
+      )}
       {isDraft && <Alert severity="info" sx={{ mb: 2 }}>Draft: not numbered and not yet a financial record. Review it, then issue it.</Alert>}
       {inv.status === "cancelled" && <Alert severity="error" sx={{ mb: 2 }}>Cancelled on {inv.cancelled_at && format(new Date(inv.cancelled_at), "dd MMM yyyy")}: {inv.cancel_reason}</Alert>}
       {inv.status === "issued" && inv.is_overdue && <Alert severity="warning" sx={{ mb: 2 }}>This invoice was due on {format(parseISO(inv.due_date), "dd MMM yyyy")} and still has a balance of {formatMoney(inv.balance_due)}.</Alert>}
@@ -127,7 +145,7 @@ export function InvoiceDetail({ id }: { id: string }) {
             </Grid>
             <Grid size={{ xs: 6, md: 2 }}><Field label="Invoice date">{format(parseISO(inv.issue_date), "dd MMM yyyy")}</Field></Grid>
             <Grid size={{ xs: 6, md: 2 }}><Field label="Due date">{format(parseISO(inv.due_date), "dd MMM yyyy")}</Field></Grid>
-            <Grid size={{ xs: 6, md: 2 }}><Field label="Type">{INVOICE_TYPE_LABELS[inv.invoice_type as keyof typeof INVOICE_TYPE_LABELS]}</Field></Grid>
+            <Grid size={{ xs: 6, md: 2 }}><Field label="Sale"><Link href={`/sales/${inv.sale_id}`}>{inv.sale_number}</Link></Field></Grid>
             <Grid size={{ xs: 6, md: 2 }}>
               <Field label="Place of supply">{inv.place_of_supply_state_code ? `${stateNameByCode(inv.place_of_supply_state_code)} (${inv.place_of_supply_state_code})` : null}{inv.supply_type && <Box sx={{ color: "text.secondary" }}>{inv.supply_type === "intra" ? "CGST + SGST" : "IGST"}</Box>}</Field>
             </Grid>
@@ -186,7 +204,7 @@ export function InvoiceDetail({ id }: { id: string }) {
                       <TableRow key={a.id} sx={{ opacity: a.reversed_at ? 0.55 : 1 }}>
                         <TableCell><Link href={`/payments/${a.payment_id}`}>{a.receipt_number}</Link></TableCell>
                         <TableCell>{format(parseISO(a.payment_date), "dd MMM yyyy")}</TableCell>
-                        <TableCell>{PAYMENT_METHOD_LABELS[a.method as keyof typeof PAYMENT_METHOD_LABELS] ?? a.method}</TableCell>
+                        <TableCell><OptionLabel table="payments" column="method" value={a.method} /></TableCell>
                         <TableCell align="right">{formatMoney(a.amount)}</TableCell>
                         <TableCell>{a.reversed_at ? "Reversed" : "Applied"}</TableCell>
                       </TableRow>
@@ -209,7 +227,7 @@ export function InvoiceDetail({ id }: { id: string }) {
           message={<>Cancelling <strong>{inv.invoice_number}</strong> keeps its number and record but removes it from outstanding balances. This cannot be undone.</>} />
       )}
       {dialog === "pay" && (
-        <RecordPaymentDialog clientId={inv.client_id} focusInvoiceId={inv.id} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); reload(); }} />
+        <RecordPaymentDialog clientId={inv.client_id} saleId={inv.sale_id} saleNumber={inv.sale_number} suggestedAmount={inv.balance_due} focusInvoiceId={inv.id} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); reload(); }} />
       )}
     </>
   );

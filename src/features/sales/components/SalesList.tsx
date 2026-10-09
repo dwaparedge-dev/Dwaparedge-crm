@@ -22,9 +22,10 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
 import { formatMoney } from "@/lib/format";
-import { SALE_STATUSES, SALE_TYPES } from "../schema";
+import { SALE_STATUSES } from "../schema";
+import { OptionFilter, OptionLabel } from "@/features/options/components/OptionSelect";
 import type { SaleRow } from "../service";
-import { SALE_TYPE_LABELS, SaleStatusChip } from "./common";
+import { BILLING_LABEL, PAYMENT_LABEL, SaleStatusChip } from "./common";
 
 interface Props {
   /** When set, the list is scoped to one client and rendered without page chrome. */
@@ -64,10 +65,7 @@ export function SalesList({ clientId }: Props) {
           <MenuItem value="">All</MenuItem>
           {SALE_STATUSES.map((s) => <MenuItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</MenuItem>)}
         </TextField>
-        <TextField select size="small" label="Type" value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} sx={{ minWidth: 170 }}>
-          <MenuItem value="">All</MenuItem>
-          {SALE_TYPES.map((t) => <MenuItem key={t} value={t}>{SALE_TYPE_LABELS[t]}</MenuItem>)}
-        </TextField>
+        <OptionFilter table="sales" column="type" label="Type" value={type} onChange={(v) => { setType(v); setPage(0); }} minWidth={170} />
         {clientId && <Box sx={{ ml: "auto" }}><Button component={Link} href={newHref} variant="contained" startIcon={<AddIcon />}>Add sale</Button></Box>}
       </Box>
       {error ? <ErrorState message={error} onRetry={reload} />
@@ -82,7 +80,7 @@ export function SalesList({ clientId }: Props) {
                 <TableHead>
                   <TableRow>
                     <TableCell>Sale</TableCell>{!clientId && <TableCell>Client</TableCell>}<TableCell>Type</TableCell><TableCell>Date</TableCell>
-                    <TableCell align="right">Total (incl. GST)</TableCell><TableCell>Status</TableCell>
+                    <TableCell align="right">Order value</TableCell><TableCell align="right">Billed</TableCell><TableCell align="right">Paid</TableCell><TableCell align="right">Balance remaining</TableCell><TableCell>Status</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -93,10 +91,18 @@ export function SalesList({ clientId }: Props) {
                         <Box sx={{ color: "text.secondary", fontSize: 13 }}>{s.title}</Box>
                       </TableCell>
                       {!clientId && <TableCell>{s.client_name}</TableCell>}
-                      <TableCell>{SALE_TYPE_LABELS[s.type] ?? s.type}</TableCell>
+                      <TableCell><OptionLabel table="sales" column="type" value={s.type} /></TableCell>
                       <TableCell>{format(new Date(s.sale_date), "dd MMM yyyy")}</TableCell>
                       <TableCell align="right">{formatMoney(s.total, s.currency)}</TableCell>
-                      <TableCell><SaleStatusChip status={s.status} /></TableCell>
+                      <TableCell align="right">{formatMoney(s.billed_total)}</TableCell>
+                      <TableCell align="right">{formatMoney(s.paid_total)}</TableCell>
+                      <TableCell align="right">{s.status === "cancelled" ? "—" : formatMoney(s.balance_remaining)}</TableCell>
+                      <TableCell>
+                        <SaleStatusChip status={s.status} />
+                        {s.status === "confirmed" || s.status === "completed" ? (
+                          <Box sx={{ mt: 0.5, color: "text.secondary", fontSize: 12 }}>{BILLING_LABEL[s.billing_status]} · {PAYMENT_LABEL[s.payment_status]}</Box>
+                        ) : null}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

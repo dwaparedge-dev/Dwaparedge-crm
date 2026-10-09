@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { configureCompany, createTestDb, expectAppError, issuedInvoice, LINE, makeClient, makeUser, type TestDb } from "./helpers";
+import { bill, configureCompany, confirmedSale, createTestDb, expectAppError, issuedInvoice, LINE, makeClient, makeUser, patchDraft, type TestDb } from "./helpers";
 
 let tdb: TestDb;
 let actor: string;
@@ -15,10 +15,14 @@ beforeAll(async () => {
 });
 afterAll(async () => tdb?.drop());
 
-async function draft(clientId: string, over: Record<string, unknown> = {}) {
-  const { createDraft } = await import("@/features/invoices/service");
-  const { invoiceInputSchema } = await import("@/features/invoices/schema");
-  return createDraft(invoiceInputSchema.parse({ clientId, invoiceType: "service", issueDate: "2026-10-05", dueDate: "2026-10-20", items: [LINE("1000", "18", "3")], ...over }), actor);
+/** A draft billing a fresh sale of the given lines (default: 3 x 1000 at 18%). */
+async function draft(clientId: string, over: { items?: Record<string, unknown>[]; placeOfSupplyStateCode?: string; issueDate?: string; dueDate?: string } = {}) {
+  const saleId = await confirmedSale(actor, clientId, over.items ?? [LINE("1000", "18", "3")]);
+  const id = await bill(actor, saleId);
+  const { items, ...patch } = over;
+  void items;
+  if (Object.keys(patch).length) await patchDraft(actor, id, patch);
+  return id;
 }
 
 describe("GST on invoices", () => {
@@ -84,8 +88,7 @@ describe("issuing and numbering", () => {
     expect(inv.company_snapshot?.legal_name).toBe("Test Company Pvt Ltd");
   });
   it("rejects a zero-value invoice", async () => {
-    const { issueInvoice } = await import("@/features/invoices/service");
-    await expectAppError(issueInvoice(await draft(intra, { items: [LINE("0", "0")] }), actor), 422);
+    await expectAppError(draft(intra, { items: [LINE("0", "0")] }), 422);
   });
 });
 
@@ -93,8 +96,10 @@ describe("issued invoice immutability", () => {
   it("rejects edits and deletes through the service", async () => {
     const { updateDraft, deleteDraft } = await import("@/features/invoices/service");
     const { invoiceInputSchema } = await import("@/features/invoices/schema");
-    const { id } = await issuedInvoice(actor, intra);
-    const input = invoiceInputSchema.parse({ clientId: intra, invoiceType: "service", issueDate: "2026-10-05", dueDate: "2026-10-20", items: [LINE("1", "0")] });
+    const { getInvoice } = await import("@/features/invoices/service");
+    const { id, saleId } = await issuedInvoice(actor, intra);
+    const item = (await getInvoice(id)).items[0]!;
+    const input = invoiceInputSchema.parse({ saleId, issueDate: "2026-10-05", dueDate: "2026-10-20", items: [{ saleItemId: item.sale_item_id, description: "x", quantity: "1", unitPrice: "1" }] });
     await expectAppError(updateDraft(id, input, actor), 409, "INVOICE_LOCKED");
     await expectAppError(deleteDraft(id, actor), 409, "INVOICE_LOCKED");
   });
@@ -112,10 +117,10 @@ describe("issued invoice immutability", () => {
     const { makeProduct } = await import("./helpers");
     const { updateProduct } = await import("@/features/products/service");
     const { productInputSchema } = await import("@/features/products/schema");
-    const { createDraft, issueInvoice, getInvoice } = await import("@/features/invoices/service");
-    const { invoiceInputSchema } = await import("@/features/invoices/schema");
+    const { issueInvoice, getInvoice } = await import("@/features/invoices/service");
     const pid = await makeProduct({ name: "Catalog item", defaultPrice: "500" });
-    const id = await createDraft(invoiceInputSchema.parse({ clientId: intra, invoiceType: "service", issueDate: "2026-10-05", dueDate: "2026-10-20", items: [{ productId: pid, description: "Catalog item", quantity: "1", unitPrice: "500", taxRate: "18" }] }), actor);
+    const saleId = await confirmedSale(actor, intra, [{ productId: pid, description: "Catalog item", quantity: "1", unitPrice: "500", taxRate: "18" }]);
+    const id = await bill(actor, saleId);
     await issueInvoice(id, actor);
     await updateProduct(pid, productInputSchema.parse({ name: "Renamed", type: "software_license", defaultPrice: "9999", gstRate: "5" }), actor);
     const inv = await getInvoice(id);
@@ -132,12 +137,10 @@ describe("issued invoice immutability", () => {
 
 describe("sale to invoice", () => {
   it("copies the sale's items into a draft linked to the sale", async () => {
-    const { createSale } = await import("@/features/sales/service");
-    const { saleInputSchema } = await import("@/features/sales/schema");
-    const { createDraftFromSale, getInvoice } = await import("@/features/invoices/service");
-    const saleId = await createSale(saleInputSchema.parse({ clientId: intra, type: "project", title: "Build", saleDate: "2026-10-05", items: [LINE("50000", "18")] }), actor);
-    const invId = await createDraftFromSale(saleId, actor);
-    const inv = await getInvoice(invId);
-    expect(inv).toMatchObject({ status: "draft", sale_id: saleId, invoice_type: "project", total: "59000.00" });
+    const { getInvoice } = await import("@/features/invoices/service");
+    const saleId = await confirmedSale(actor, intra, [LINE("50000", "18")], { type: "project" });
+    const inv = await getInvoice(await bill(actor, saleId));
+    expect(inv).toMatchObject({ status: "draft", sale_id: saleId, total: "59000.00" });
+    expect(inv.items[0]!.sale_item_id).toBeTruthy();
   });
 });

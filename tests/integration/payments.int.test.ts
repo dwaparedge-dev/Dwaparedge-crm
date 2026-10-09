@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { configureCompany, createTestDb, expectAppError, issuedInvoice, makeClient, makeUser, type TestDb } from "./helpers";
+import { bill, configureCompany, confirmedSale, createTestDb, expectAppError, issuedInvoice, LINE, makeClient, makeUser, type TestDb } from "./helpers";
 
 let tdb: TestDb;
 let actor: string;
@@ -56,8 +56,6 @@ describe("payment status is derived from allocations", () => {
 describe("invalid allocations are refused", () => {
   it("rejects more than the invoice balance, more than the payment, wrong client, drafts and voided payments", async () => {
     const { allocatePayment, voidPayment } = await import("@/features/payments/service");
-    const { createDraft } = await import("@/features/invoices/service");
-    const { invoiceInputSchema } = await import("@/features/invoices/schema");
     const inv = await invoice();
     const p = await pay("5000");
     await expectAppError(allocatePayment(p.id, [{ invoiceId: inv.id, amount: "1180.01" }], actor), 422, "ALLOCATION_INVALID", /exceeds its balance/);
@@ -66,7 +64,7 @@ describe("invalid allocations are refused", () => {
     const other = await makeClient(actor);
     const foreign = await pay("100", [], other);
     await expectAppError(allocatePayment(foreign.id, [{ invoiceId: inv.id, amount: "10" }], actor), 422, "ALLOCATION_INVALID", /different client/);
-    const d = await createDraft(invoiceInputSchema.parse({ clientId: client, invoiceType: "service", issueDate: "2026-10-05", dueDate: "2026-10-20", items: [{ description: "x", quantity: "1", unitPrice: "10" }] }), actor);
+    const d = await bill(actor, await confirmedSale(actor, client, [LINE("10", "0")]));
     await expectAppError(allocatePayment(p.id, [{ invoiceId: d, amount: "5" }], actor), 422, "ALLOCATION_INVALID", /issued/);
     await voidPayment(p.id, "mistake", actor);
     await expectAppError(allocatePayment(p.id, [{ invoiceId: inv.id, amount: "5" }], actor), 422, "ALLOCATION_INVALID", /voided/);

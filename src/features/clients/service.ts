@@ -4,7 +4,6 @@ import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { AppError } from "@/lib/auth/errors";
 import { likePattern } from "@/lib/validation";
-import { stateNameByCode } from "@/lib/india";
 import { SORT_COLUMNS, type ClientInput, type ListClientsParams } from "./schema";
 
 export interface ClientRow {
@@ -19,10 +18,8 @@ export interface ClientRow {
   shipping_address: string | null;
   city: string | null;
   state_code: string | null;
-  state: string | null;
   postal_code: string | null;
   country: string;
-  status: "active" | "inactive";
   owner_id: string | null;
   owner_name: string | null;
   notes: string | null;
@@ -43,7 +40,6 @@ export async function listClients(p: ListClientsParams) {
     return `$${values.length}`;
   };
 
-  if (p.status) where.push(`c.status = ${add(p.status)}`);
   if (p.ownerId) where.push(`c.owner_id = ${add(p.ownerId)}`);
   if (p.search) {
     const s = add(likePattern(p.search));
@@ -118,12 +114,12 @@ async function assertNoConflict(input: ClientInput, excludeId: string | null, co
 
 const COLUMNS = [
   "legal_name", "display_name", "gstin", "pan", "email", "phone", "billing_address", "shipping_address",
-  "city", "state_code", "state", "postal_code", "country", "status", "owner_id", "notes",
+  "city", "state_code", "postal_code", "country", "owner_id", "notes",
 ] as const;
 
 const toParams = (i: ClientInput) => [
   i.legalName, i.displayName, i.gstin, i.pan, i.email, i.phone, i.billingAddress, i.shippingAddress,
-  i.city, i.stateCode, stateNameByCode(i.stateCode), i.postalCode, i.country, i.status, i.ownerId, i.notes,
+  i.city, i.stateCode, i.postalCode, i.country, i.ownerId, i.notes,
 ];
 
 export async function createClient(input: ClientInput, actorId: string, confirmDuplicate = false) {

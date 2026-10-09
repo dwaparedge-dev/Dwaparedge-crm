@@ -33,18 +33,20 @@ Mutating requests (`POST/PUT/PATCH/DELETE`) must send `Content-Type: application
 | `/api/products` | GET, POST | GET filters: `type`, `active` |
 | `/api/products/{id}` | GET, PATCH | Changes never affect existing sales/invoices |
 | `/api/sales` | GET, POST | GET filters: `clientId`, `status`, `type` |
-| `/api/sales/{id}` | GET, PATCH | Locked once completed/cancelled |
-| `/api/sales/{id}/status` | POST | `{status: confirmed\|completed\|cancelled}` |
-| `/api/sales/{id}/invoice` | POST | Creates a draft invoice from the sale |
+| `/api/sales/{id}` | GET, PATCH | GET returns the sale with its items (billed / left to bill each), billing plan and the derived figures (`billed_total`, `paid_total`, `advance`, `due_on_invoices`, `unbilled_estimate`, `balance_remaining`, `billing_status`, `payment_status`). PATCH keeps item identity via `itemId`; billed items cannot be removed or reduced below what is billed. Locked once completed/cancelled |
+| `/api/sales/{id}/status` | POST | `{status: confirmed\|completed\|cancelled}`. Completing needs the sale fully billed; cancelling needs no live invoices and no unallocated advance |
+| `/api/sales/{id}/invoice` | POST | Creates a draft invoice against a confirmed sale: `{mode: "rest"}` \| `{mode: "percent", percent}` \| `{mode: "amount", amount}` (before GST) \| `{mode: "milestone", milestoneId}` |
+| `/api/sales/{id}/milestones` | PUT | Replaces the billing plan: `{milestones: [{id?, title, basis: percent\|amount, percent?, amount?, dueDate?}]}`. Instalments with a live invoice must be kept |
+| `/api/sales/{id}/apply-advance` | POST | `{invoiceId?}` allocates the sale's unallocated advance to its issued invoices (oldest due first) |
 | `/api/licenses` | GET, POST | GET filters: `clientId`, `productId`, `status` (incl. `expired`), `expiringWithin` (days), `sort` |
 | `/api/licenses/{id}` | GET, PATCH | GET includes full history |
 | `/api/licenses/{id}/action` | POST | `{action: activate\|renew\|suspend\|reinstate\|revoke, note?, newExpiry?, renewalPrice?}` |
-| `/api/invoices` | GET, POST | GET filters: `clientId`, `status`, `paymentStatus`, `openOnly`, `from`, `to`. POST creates a draft |
+| `/api/invoices` | GET, POST | GET filters: `clientId`, `saleId`, `status`, `paymentStatus`, `openOnly`, `from`, `to`. POST creates a draft: `{saleId, issueDate, dueDate, items: [{saleItemId, …}]}`; every line must bill a line of that sale and not exceed what is left of it |
 | `/api/invoices/{id}` | GET, PATCH, DELETE | PATCH/DELETE only for drafts |
 | `/api/invoices/{id}/issue` | POST | Assigns the number; makes the invoice permanent |
 | `/api/invoices/{id}/cancel` | POST | `{reason}`; refused while payments are allocated |
 | `/api/invoices/{id}/pdf` | GET | `application/pdf`; `?download=1` for attachment |
-| `/api/payments` | GET, POST | POST may include `allocations: [{invoiceId, amount}]` |
+| `/api/payments` | GET, POST | POST may include `saleId` (tag the payment to a sale; unallocated money becomes its advance) and `allocations: [{invoiceId, amount}]`. GET filter `saleId` lists payments tagged to the sale or allocated to its invoices (with `applied_to_sale`) |
 | `/api/payments/{id}` | GET | Includes allocations |
 | `/api/payments/{id}/allocations` | POST | `{allocations: [...]}` |
 | `/api/payments/{id}/void` | POST | `{reason}`; refused while allocated |
@@ -53,5 +55,7 @@ Mutating requests (`POST/PUT/PATCH/DELETE`) must send `Content-Type: application
 | `/api/settings` | GET, PUT | Company details, bank, numbering, defaults |
 | `/api/dashboard` | GET | `?from=&to=` (YYYY-MM-DD) |
 | `/api/reports` | GET | Catalogue of reports |
-| `/api/reports/{key}` | GET | Keys: `clients sales invoices payments outstanding overdue licenses renewals ledger activity`. `?format=csv` exports (≤ 50,000 rows) |
+| `/api/reports/{key}` | GET | Keys: `clients sales salebilling invoices payments outstanding overdue licenses renewals ledger activity`. `?format=csv` exports (≤ 50,000 rows) |
 | `/api/users/options` | GET | Active staff for dropdowns |
+| `/api/options` | GET, POST | GET `?table=&column=` lists a dropdown (no params: all, with usage, for Settings). POST `{table, column, label}` adds an option, or returns the existing one with the same name. Only whitelisted `table.column` pairs are accepted |
+| `/api/options/{id}` | PATCH, DELETE | PATCH `{label?, sortOrder?, isActive?}`; DELETE refused for built-in or in-use options |

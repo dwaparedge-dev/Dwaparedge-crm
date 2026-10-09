@@ -28,7 +28,7 @@ import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
 import { parseScaled } from "@/lib/money";
-import { PAYMENT_METHOD_LABELS } from "../schema";
+import { OptionLabel } from "@/features/options/components/OptionSelect";
 import type { AllocationRow, PaymentRow } from "../service";
 import { AllocationGrid, sumAllocations } from "./AllocationGrid";
 
@@ -108,9 +108,9 @@ export function PaymentDetail({ id }: { id: string }) {
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Grid container spacing={3}>
-            <Grid size={{ xs: 12, md: 4 }}><Field label="Client"><Link href={`/clients/${p.client_id}`}>{p.client_name}</Link></Field></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><Field label="Client"><Link href={`/clients/${p.client_id}`}>{p.client_name}</Link>{p.sale_id && <Box sx={{ color: "text.secondary" }}>For sale <Link href={`/sales/${p.sale_id}`}>{p.sale_number}</Link></Box>}</Field></Grid>
             <Grid size={{ xs: 6, md: 2 }}><Field label="Date">{format(parseISO(p.payment_date), "dd MMM yyyy")}</Field></Grid>
-            <Grid size={{ xs: 6, md: 3 }}><Field label="Method">{PAYMENT_METHOD_LABELS[p.method as keyof typeof PAYMENT_METHOD_LABELS] ?? p.method}</Field></Grid>
+            <Grid size={{ xs: 6, md: 3 }}><Field label="Method"><OptionLabel table="payments" column="method" value={p.method} /></Field></Grid>
             <Grid size={{ xs: 12, md: 3 }}><Field label="Reference">{p.reference}</Field></Grid>
             <Grid size={{ xs: 6, md: 4 }}><Field label="Amount received"><strong>{formatMoney(p.amount)}</strong></Field></Grid>
             <Grid size={{ xs: 6, md: 4 }}><Field label="Allocated to invoices">{formatMoney(p.allocated)}</Field></Grid>

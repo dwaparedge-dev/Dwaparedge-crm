@@ -7,10 +7,11 @@ const base = { name: "FactoONE license", type: "software_license", defaultPrice:
 describe("product schema", () => {
   it("applies defaults", () => {
     const p = productInputSchema.parse(base);
-    expect(p).toMatchObject({ gstRate: "18", isActive: true, isTaxExempt: false, currency: "INR", sku: null });
+    expect(p).toMatchObject({ gstRate: "18", isActive: true, sku: null });
   });
-  it("forces GST to 0 for exempt products", () => {
-    expect(productInputSchema.parse({ ...base, gstRate: "18", isTaxExempt: true }).gstRate).toBe("0");
+  it("accepts any option key for the type (validated against field_options by the service)", () => {
+    expect(productInputSchema.parse({ ...base, type: "training_course" }).type).toBe("training_course");
+    expect(productInputSchema.safeParse({ ...base, type: "" }).success).toBe(false);
   });
   it("rejects prices with more than 2 decimals and negatives", () => {
     expect(productInputSchema.safeParse({ ...base, defaultPrice: "1.234" }).success).toBe(false);

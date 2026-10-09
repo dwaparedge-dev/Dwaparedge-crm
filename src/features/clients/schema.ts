@@ -20,7 +20,6 @@ const clientFields = z.object({
   ),
   postalCode: optionalText(12),
   country: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().max(100).default("India")),
-  status: z.enum(["active", "inactive"]).default("active"),
   ownerId: z.preprocess((v) => (v === "" ? null : v), uuid.nullable().default(null)),
   notes: optionalText(5000),
 });
@@ -43,13 +42,12 @@ export const clientInputSchema = clientFields.superRefine(crossChecks).transform
 }));
 export type ClientInput = z.infer<typeof clientInputSchema>;
 
-export const SORT_COLUMNS = { name: "c.display_name", created: "c.created_at", status: "c.status" } as const;
+export const SORT_COLUMNS = { name: "c.display_name", created: "c.created_at" } as const;
 
 export const listClientsSchema = pageParams.extend({
-  status: z.enum(["active", "inactive"]).optional(),
   archived: z.enum(["true", "false"]).default("false"),
   ownerId: uuid.optional(),
-  sort: z.enum(["name", "created", "status"]).default("name"),
+  sort: z.enum(["name", "created"]).default("name"),
   dir: z.enum(["asc", "desc"]).default("asc"),
 });
 export type ListClientsParams = z.infer<typeof listClientsSchema>;

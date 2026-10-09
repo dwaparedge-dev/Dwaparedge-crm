@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/invoices
       const c = (await db.queryOne<Record<string, string | null>>("SELECT * FROM clients WHERE id = $1", [invoice.client_id]))!;
       client = {
         name: c.display_name!, legalName: c.legal_name!, gstin: c.gstin ?? null, pan: c.pan ?? null, billingAddress: c.billing_address ?? null, shippingAddress: c.shipping_address ?? null,
-        city: c.city ?? null, state: c.state ?? null, stateCode: c.state_code ?? null, postalCode: c.postal_code ?? null, country: c.country!, email: c.email ?? null, phone: c.phone ?? null,
+        city: c.city ?? null, state: stateNameByCode(c.state_code), stateCode: c.state_code ?? null, postalCode: c.postal_code ?? null, country: c.country!, email: c.email ?? null, phone: c.phone ?? null,
       };
     }
     const pdf = await buildInvoicePdf({ invoice, items, company, client });

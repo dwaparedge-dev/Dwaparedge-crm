@@ -11,6 +11,7 @@ import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { ClientPicker } from "@/components/common/ClientPicker";
+import { OptionSelect } from "@/features/options/components/OptionSelect";
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
 import type { ProductRow } from "@/features/products/service";
@@ -88,7 +89,9 @@ export function LicenseForm({ initial, licenseId, lockIdentity, lockDates, onSav
               )} />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
-              <TextField label="Plan" required fullWidth placeholder="e.g. Standard, Enterprise" {...register("plan", { required: "Plan is required" })} {...f("plan")} />
+              <Controller name="plan" control={control} rules={{ required: "Plan is required" }} render={({ field, fieldState }) => (
+                <OptionSelect table="licenses" column="plan" label="Plan" required value={field.value} onChange={field.onChange} error={fieldState.error?.message} helperText="e.g. Standard, Enterprise. Type a new plan to add it." />
+              )} />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField label="Seat / user limit" fullWidth inputMode="numeric" helperText={errors.seatLimit?.message ?? "Leave blank for unlimited"} error={Boolean(errors.seatLimit)}

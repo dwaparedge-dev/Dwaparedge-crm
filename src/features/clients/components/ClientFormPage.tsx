@@ -11,7 +11,7 @@ import type { ClientRow } from "../service";
 const toForm = (c: ClientRow): ClientFormValues => ({
   legalName: c.legal_name, displayName: c.display_name, gstin: c.gstin ?? "", pan: c.pan ?? "", email: c.email ?? "", phone: c.phone ?? "",
   billingAddress: c.billing_address ?? "", shippingAddress: c.shipping_address ?? "", city: c.city ?? "", stateCode: c.state_code ?? "",
-  postalCode: c.postal_code ?? "", country: c.country, status: c.status, ownerId: c.owner_id ?? "", notes: c.notes ?? "",
+  postalCode: c.postal_code ?? "", country: c.country, ownerId: c.owner_id ?? "", notes: c.notes ?? "",
 });
 
 export function ClientFormPage({ clientId }: { clientId?: string }) {

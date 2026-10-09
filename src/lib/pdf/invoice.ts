@@ -2,7 +2,6 @@ import "server-only";
 import { amountInWordsINR } from "@/lib/words";
 import { COLORS, dmy, joinLines, money, newDoc, toBuffer, watermark } from "./common";
 import type { ClientSnapshot, CompanySnapshot, InvoiceItemRow, InvoiceRow } from "@/features/invoices/service";
-import { INVOICE_TYPE_LABELS } from "@/features/invoices/schema";
 
 export interface InvoicePdfData {
   invoice: InvoiceRow;
@@ -52,10 +51,10 @@ function metaAndParties(doc: Doc, d: InvoicePdfData, top: number): number {
     ["Invoice No.", inv.invoice_number ?? "DRAFT (not numbered)"],
     ["Invoice Date", dmy(inv.issue_date)],
     ["Due Date", dmy(inv.due_date)],
-    ["Invoice Type", INVOICE_TYPE_LABELS[inv.invoice_type as keyof typeof INVOICE_TYPE_LABELS] ?? inv.invoice_type],
+    ["Order Ref.", inv.sale_number],
     ["Place of Supply", [stateOf(d), inv.place_of_supply_state_code && `(${inv.place_of_supply_state_code})`].filter(Boolean).join(" ")],
   ];
-  doc.roundedRect(L, top, half, 84, 4).strokeColor(COLORS.line).lineWidth(0.8).stroke();
+  doc.roundedRect(L, top, half, 99, 4).strokeColor(COLORS.line).lineWidth(0.8).stroke();
   let y = top + 8;
   for (const [k, v] of rows) {
     doc.font("Helvetica").fontSize(8.5).fillColor(COLORS.muted).text(k, L + 8, y, { width: 80 });
@@ -64,14 +63,14 @@ function metaAndParties(doc: Doc, d: InvoicePdfData, top: number): number {
   }
   const cl = d.client;
   const bx = L + half + 8;
-  doc.roundedRect(bx, top, half, 84, 4).strokeColor(COLORS.line).stroke();
+  doc.roundedRect(bx, top, half, 99, 4).strokeColor(COLORS.line).stroke();
   doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.muted).text("BILL TO", bx + 8, top + 7);
   doc.font("Helvetica-Bold").fontSize(10).fillColor(COLORS.ink).text(cl.legalName || cl.name, bx + 8, top + 19, { width: half - 16, height: 14, ellipsis: true });
   doc.font("Helvetica").fontSize(8.5).fillColor(COLORS.muted).text(
     joinLines(cl.billingAddress, [cl.city, cl.state, cl.postalCode].filter(Boolean).join(", "), cl.gstin && `GSTIN: ${cl.gstin}`),
-    bx + 8, top + 33, { width: half - 16, height: 48, ellipsis: true },
+    bx + 8, top + 33, { width: half - 16, height: 62, ellipsis: true },
   );
-  return top + 84;
+  return top + 99;
 }
 
 const stateOf = (d: InvoicePdfData) => {

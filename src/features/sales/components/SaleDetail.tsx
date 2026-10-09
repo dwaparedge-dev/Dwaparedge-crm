@@ -1,19 +1,22 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
 import Skeleton from "@mui/material/Skeleton";
+import Tab from "@mui/material/Tab";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
+import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { format } from "date-fns";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -23,16 +26,22 @@ import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 import { formatMoney } from "@/lib/format";
-import type { SaleItemRow, SaleRow } from "../service";
-import { SALE_TYPE_LABELS, SaleStatusChip } from "./common";
+import { InvoicesList } from "@/features/invoices/components/InvoicesList";
+import { PaymentsList } from "@/features/payments/components/PaymentsList";
+import type { MilestoneRow, SaleItemRow, SaleRow } from "../service";
+import { OptionLabel } from "@/features/options/components/OptionSelect";
+import { BILLING_LABEL, PAYMENT_LABEL, SaleStatusChip } from "./common";
+import { BillSaleDialog } from "./BillSaleDialog";
+import { PlanTab } from "./PlanTab";
+import { SaleSummary } from "./SaleSummary";
 
-type Detail = SaleRow & { items: SaleItemRow[] };
+type Detail = SaleRow & { items: SaleItemRow[]; milestones: MilestoneRow[] };
 type Action = "confirmed" | "completed" | "cancelled";
 
 const COPY: Record<Action, { title: string; message: string; label: string; destructive?: boolean }> = {
-  confirmed: { title: "Confirm sale?", message: "Mark this sale as confirmed by the client.", label: "Confirm" },
-  completed: { title: "Mark as completed?", message: "A completed sale can no longer be edited.", label: "Mark completed" },
-  cancelled: { title: "Cancel sale?", message: "A cancelled sale can no longer be edited or reopened.", label: "Cancel sale", destructive: true },
+  confirmed: { title: "Confirm sale?", message: "Mark this sale as confirmed by the client. Invoices can only be raised against a confirmed sale.", label: "Confirm" },
+  completed: { title: "Mark as completed?", message: "A completed sale can no longer be edited or invoiced. This needs everything to be billed.", label: "Mark completed" },
+  cancelled: { title: "Cancel sale?", message: "A cancelled sale can no longer be edited or reopened. It must have no invoices and no unallocated advance.", label: "Cancel sale", destructive: true },
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -46,27 +55,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function SaleDetail({ id }: { id: string }) {
   const notify = useNotify();
-  const router = useRouter();
   const { data: s, error, loading, reload } = useFetch<Detail>(`/api/sales/${id}`);
   const [action, setAction] = useState<Action | null>(null);
+  const [billing, setBilling] = useState<{ milestoneId?: string } | null>(null);
+  const [tab, setTab] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [paymentsKey, setPaymentsKey] = useState(0);
 
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (loading || !s) return <><Skeleton width={260} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
+  if (loading && !s) return <><Skeleton width={260} height={40} /><Skeleton variant="rounded" height={300} sx={{ mt: 2 }} /></>;
+  if (!s) return null;
 
   const editable = s.status === "draft" || s.status === "confirmed";
-
-  async function createInvoice() {
-    setBusy(true);
-    try {
-      const r = await api<{ id: string }>(`/api/sales/${id}/invoice`, { method: "POST" });
-      notify.success("Draft invoice created from this sale. Review it, then issue it.");
-      router.push(`/invoices/${r.id}`);
-    } catch (e) {
-      notify.error(e instanceof Error ? e.message : "Could not create the invoice");
-      setBusy(false);
-    }
-  }
+  const canBill = s.status === "confirmed";
 
   async function run() {
     if (!action) return;
@@ -77,7 +78,21 @@ export function SaleDetail({ id }: { id: string }) {
       setAction(null);
       reload();
     } catch (e) {
+      setAction(null);
       notify.error(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyAdvance() {
+    setBusy(true);
+    try {
+      const r = await api<{ applied: string }>(`/api/sales/${id}/apply-advance`, { method: "POST" });
+      notify.success(`${formatMoney(r.applied)} of the advance applied to this sale's invoices`);
+      setPaymentsKey((k) => k + 1);
+      reload();
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : "Could not apply the advance");
     } finally {
       setBusy(false);
     }
@@ -90,65 +105,90 @@ export function SaleDetail({ id }: { id: string }) {
         crumbs={[{ label: "Dashboard", href: "/" }, { label: "Sales", href: "/sales" }, { label: s.sale_number }]}
         actions={
           <>
-            {s.status !== "cancelled" && <Button variant="outlined" onClick={createInvoice} disabled={busy}>Create invoice</Button>}
             {editable && <Button component={Link} href={`/sales/${id}/edit`} variant="outlined">Edit</Button>}
-            {s.status === "draft" && <Button variant="contained" onClick={() => setAction("confirmed")}>Confirm</Button>}
-            {s.status === "confirmed" && <Button variant="contained" onClick={() => setAction("completed")}>Mark completed</Button>}
+            {s.status === "draft" && <Button variant="contained" onClick={() => setAction("confirmed")}>Confirm sale</Button>}
+            {canBill && <Button variant="contained" onClick={() => setBilling({})} disabled={Number(s.to_bill_taxable) <= 0}>Create invoice</Button>}
+            {s.status === "confirmed" && <Button variant="outlined" onClick={() => setAction("completed")}>Mark completed</Button>}
             {editable && <Button color="error" variant="outlined" onClick={() => setAction("cancelled")}>Cancel sale</Button>}
           </>
         }
       />
+      {s.status === "draft" && <Alert severity="info" sx={{ mb: 2 }}>This sale is a draft. Confirm it to start invoicing and taking payments against it.</Alert>}
+      {s.status === "cancelled" && <Alert severity="error" sx={{ mb: 2 }}>This sale was cancelled.</Alert>}
+      {Number(s.advance) > 0 && s.status !== "cancelled" && (
+        <Alert severity="info" sx={{ mb: 2 }} action={Number(s.due_on_invoices) > 0 ? <Button color="inherit" size="small" onClick={applyAdvance} disabled={busy}>Apply advance</Button> : undefined}>
+          {formatMoney(s.advance)} was received for this sale and is not applied to an invoice yet.{Number(s.due_on_invoices) > 0 ? " Apply it to the invoices that are due." : " It will be available to apply once an invoice is issued."}
+        </Alert>
+      )}
+
+      <SaleSummary sale={s} />
+
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Typography variant="h6" sx={{ mb: 2 }}>{s.title}</Typography>
           <Grid container spacing={3}>
             <Grid size={{ xs: 12, md: 4 }}><Field label="Client"><Link href={`/clients/${s.client_id}`}>{s.client_name}</Link></Field></Grid>
-            <Grid size={{ xs: 6, md: 4 }}><Field label="Type">{SALE_TYPE_LABELS[s.type] ?? s.type}</Field></Grid>
-            <Grid size={{ xs: 6, md: 4 }}><Field label="Owner">{s.owner_name}</Field></Grid>
-            <Grid size={{ xs: 6, md: 4 }}><Field label="Sale date">{format(new Date(s.sale_date), "dd MMM yyyy")}</Field></Grid>
-            <Grid size={{ xs: 6, md: 4 }}><Field label="Expected closing">{s.expected_close ? format(new Date(s.expected_close), "dd MMM yyyy") : null}</Field></Grid>
-            <Grid size={12}><Field label="Notes">{s.notes}</Field></Grid>
+            <Grid size={{ xs: 6, md: 2 }}><Field label="Type"><OptionLabel table="sales" column="type" value={s.type} /></Field></Grid>
+            <Grid size={{ xs: 6, md: 2 }}><Field label="Owner">{s.owner_name}</Field></Grid>
+            <Grid size={{ xs: 6, md: 2 }}><Field label="Sale date">{format(new Date(s.sale_date), "dd MMM yyyy")}</Field></Grid>
+            <Grid size={{ xs: 6, md: 2 }}><Field label="Expected closing">{s.expected_close ? format(new Date(s.expected_close), "dd MMM yyyy") : null}</Field></Grid>
+            <Grid size={12}>
+              <Box sx={{ display: "flex", gap: 1 }}>
+                <Chip size="small" variant="outlined" color={s.billing_status === "fully_billed" ? "success" : "default"} label={BILLING_LABEL[s.billing_status]} />
+                <Chip size="small" variant="outlined" color={s.payment_status === "paid" ? "success" : s.payment_status === "partial" ? "warning" : "default"} label={PAYMENT_LABEL[s.payment_status]} />
+              </Box>
+            </Grid>
+            {s.notes && <Grid size={12}><Field label="Notes">{s.notes}</Field></Grid>}
           </Grid>
         </CardContent>
       </Card>
+
       <Card>
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ borderBottom: 1, borderColor: "divider" }}>
+          <Tab label="Items" />
+          <Tab label={`Billing plan${s.milestones.length ? ` (${s.milestones.length})` : ""}`} />
+          <Tab label="Invoices" />
+          <Tab label="Payments" />
+        </Tabs>
         <CardContent>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Items</Typography>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>#</TableCell><TableCell>Description</TableCell><TableCell align="right">Qty</TableCell><TableCell align="right">Unit price</TableCell>
-                  <TableCell align="right">Disc.</TableCell><TableCell align="right">Taxable</TableCell><TableCell align="right">GST</TableCell><TableCell align="right">Total</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {s.items.map((i) => (
-                  <TableRow key={i.id}>
-                    <TableCell>{i.position}</TableCell>
-                    <TableCell>{i.description}{i.hsn_sac && <Box sx={{ color: "text.secondary", fontSize: 12 }}>HSN/SAC {i.hsn_sac}</Box>}</TableCell>
-                    <TableCell align="right">{Number(i.quantity)}</TableCell>
-                    <TableCell align="right">{formatMoney(i.unit_price)}</TableCell>
-                    <TableCell align="right">{Number(i.discount_percent)}%</TableCell>
-                    <TableCell align="right">{formatMoney(i.taxable_amount)}</TableCell>
-                    <TableCell align="right">{formatMoney(i.tax_amount)} <Box component="span" sx={{ color: "text.secondary", fontSize: 12 }}>({Number(i.tax_rate)}%)</Box></TableCell>
-                    <TableCell align="right">{formatMoney(i.line_total)}</TableCell>
+          {tab === 0 && (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>#</TableCell><TableCell>Description</TableCell><TableCell align="right">Qty</TableCell><TableCell align="right">Unit price</TableCell>
+                    <TableCell align="right">Disc.</TableCell><TableCell align="right">Taxable</TableCell><TableCell align="right">GST</TableCell><TableCell align="right">Total</TableCell>
+                    <TableCell align="right">Invoiced</TableCell><TableCell align="right">Left to bill</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          <Box sx={{ ml: "auto", mt: 2, maxWidth: 320 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}><Typography color="text.secondary">Subtotal (after discounts)</Typography><Typography>{formatMoney(s.subtotal)}</Typography></Box>
-            <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}><Typography color="text.secondary">GST</Typography><Typography>{formatMoney(s.tax_total)}</Typography></Box>
-            <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}><Typography sx={{ fontWeight: 700 }}>Estimated total</Typography><Typography sx={{ fontWeight: 700 }}>{formatMoney(s.total)}</Typography></Box>
-          </Box>
+                </TableHead>
+                <TableBody>
+                  {s.items.map((i) => (
+                    <TableRow key={i.id}>
+                      <TableCell>{i.position}</TableCell>
+                      <TableCell>{i.description}{i.hsn_sac && <Box sx={{ color: "text.secondary", fontSize: 12 }}>HSN/SAC {i.hsn_sac}</Box>}</TableCell>
+                      <TableCell align="right">{Number(i.quantity)}</TableCell>
+                      <TableCell align="right">{formatMoney(i.unit_price)}</TableCell>
+                      <TableCell align="right">{Number(i.discount_percent)}%</TableCell>
+                      <TableCell align="right">{formatMoney(i.taxable_amount)}</TableCell>
+                      <TableCell align="right">{formatMoney(i.tax_amount)} <Box component="span" sx={{ color: "text.secondary", fontSize: 12 }}>({Number(i.tax_rate)}%)</Box></TableCell>
+                      <TableCell align="right">{formatMoney(i.line_total)}</TableCell>
+                      <TableCell align="right">{formatMoney(String(Number(i.issued_taxable) + Number(i.draft_taxable)))}{Number(i.draft_taxable) > 0 && <Typography variant="caption" color="text.secondary" component="div">{formatMoney(i.draft_taxable)} in drafts</Typography>}</TableCell>
+                      <TableCell align="right">{formatMoney(i.remaining_taxable)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>Invoiced and left-to-bill are before GST. Totals here are the sale&apos;s estimate; each invoice sets the final CGST/SGST or IGST.</Typography>
+            </TableContainer>
+          )}
+          {tab === 1 && <PlanTab key={s.updated_at + s.milestones.map((m) => m.invoice_id).join()} saleId={id} subtotal={s.subtotal} milestones={s.milestones} editable={editable} onChanged={reload} onBill={(mid) => setBilling({ milestoneId: mid })} />}
+          {tab === 2 && <InvoicesList saleId={id} />}
+          {tab === 3 && <PaymentsList key={paymentsKey} clientId={s.client_id} saleId={id} saleNumber={s.sale_number} suggestedAmount={s.due_on_invoices} onChanged={reload} />}
         </CardContent>
       </Card>
-      {action && (
-        <ConfirmDialog open title={COPY[action].title} message={COPY[action].message} confirmLabel={COPY[action].label} destructive={COPY[action].destructive}
-          busy={busy} onConfirm={run} onClose={() => setAction(null)} />
-      )}
+
+      {action && <ConfirmDialog open title={COPY[action].title} message={COPY[action].message} confirmLabel={COPY[action].label} destructive={COPY[action].destructive} busy={busy} onConfirm={run} onClose={() => setAction(null)} />}
+      {billing && <BillSaleDialog saleId={id} subtotal={s.subtotal} items={s.items} milestones={s.milestones} initialMilestoneId={billing.milestoneId} onClose={() => setBilling(null)} />}
     </>
   );
 }

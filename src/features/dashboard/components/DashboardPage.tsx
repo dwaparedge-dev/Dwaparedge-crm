@@ -125,6 +125,7 @@ export function DashboardPage() {
           <Section title="Receivables right now" subtitle="As of today, regardless of the period above. Based on payments allocated to invoices.">
             <Cell><Stat label="Outstanding" value={formatMoney(d.billing.outstanding.amount)} note={`Unpaid balance on ${d.billing.outstanding.invoices} issued invoice${d.billing.outstanding.invoices === 1 ? "" : "s"}`} tone="warning" href="/reports/outstanding" /></Cell>
             <Cell><Stat label="Overdue" value={formatMoney(d.billing.overdue.amount)} note={`${d.billing.overdue.invoices} invoice${d.billing.overdue.invoices === 1 ? "" : "s"} past the due date`} tone={d.billing.overdue.invoices ? "error" : "default"} href="/reports/overdue" /></Cell>
+            <Cell><Stat label="Still to bill on confirmed sales" value={formatMoney(d.sales.toBill)} note={`${d.sales.salesToBill} sale${d.sales.salesToBill === 1 ? "" : "s"} with work not yet invoiced. Estimate incl. GST; not billed or collected`} href="/reports/salebilling" /></Cell>
             <Cell><Stat label="Advances on account" value={formatMoney(d.billing.advances)} note="Received but not yet allocated to an invoice" href="/payments" /></Cell>
           </Section>
 

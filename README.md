@@ -18,13 +18,36 @@ Internal web app for Dwapar Edge Private Limited to manage **clients, sales, sof
 
 - **Clients** with multiple contacts, GSTIN/PAN validation, duplicate detection, archive (never delete), per-client history.
 - **Products & services** catalog with HSN/SAC and GST rate (or exempt).
-- **Sales** (project / license / service) with line items, discounts and GST estimate; prices are copied into the sale.
+- **Sales** (type from your own list, e.g. project / license / service) with line items, discounts and GST estimate; prices are copied into the sale. The sale is the **hub**: every invoice and payment hangs off it, and the sale page shows order value, billed, paid, due on invoices, still to bill and the remaining balance.
+- **Dropdown options** are data, not code: sale types, product types, payment methods and license plans live in one `field_options` table. Type a new value in any of these dropdowns and choose **+ Add** to create it on the spot; rename, reorder, hide or delete them under Settings → Dropdown options.
 - **Software licenses** register: issue, activate, renew, suspend, reinstate, revoke; full history; days remaining; renewal opportunities.
-- **Invoices** in a professional PDF format: draft → issue → (cancel). CGST+SGST or IGST by state, per-line GST rates, round-off, amount in words, bank details. Issued invoices are immutable.
-- **Payments** ledger with allocation to invoices (partial, multi-invoice, advances), reallocation, void, receipts (PDF).
-- **Dashboard** and **10 reports** (CSV export), including the activity log.
+- **Invoices** are always raised **against a sale**, in full, as a percentage, as an amount before GST, or as an instalment of the sale's billing plan, so a sale can be billed in parts without ever being over-billed. Professional PDF format: draft → issue → (cancel). CGST+SGST or IGST by state, per-line GST rates, round-off, amount in words, bank details. Issued invoices are immutable.
+- **Payments** ledger with allocation to invoices (partial, multi-invoice, advances), reallocation, void, receipts (PDF). Payments can be recorded **for a sale**: part payments reduce the sale's remaining balance, and money received before an invoice exists is held as that sale's **advance** and applied (by you, with one click) once an invoice is issued.
+- **Dashboard** and **11 reports** (CSV export), including the activity log.
 
 Not in v1 (by decision): email sending, leads/follow-ups, quotations, credit notes, CSV client import, roles/permissions, e-invoicing (IRN). See [Known limitations](#known-limitations).
+
+## How it flows
+
+```
+Client ──► Sale (draft ► confirmed) ◄── Products & services catalog
+              │  items: price + GST per line (copied into the sale)
+              │  optional billing plan (instalments: % or ₹ before GST)
+              │
+   ┌──────────┼────────────────────────┐
+   ▼          ▼                        ▼
+Advance     Invoice draft(s)         License(s)
+payment     bill: rest │ % │ ₹ │      issued → active → renew /
+(tagged     instalment                suspend / revoke
+to sale)        │ issue → number, frozen, PDF
+   │            ▼
+   │      Issued invoice ◄──── allocate ──── Payment (part or full)
+   └─ Apply advance ──────────────┘
+                 ▼
+   Sale balance = order value − paid · done when fully billed
+```
+
+Dropdown lists (sale type, product type, payment method, license plan) come from one `field_options` table and can be extended from the dropdown itself.
 
 ## Quick start
 
@@ -147,16 +170,23 @@ Route handlers are thin: parse with Zod → `requireUser()` → call a service �
 
 ### Business rules worth knowing
 
+- **Sale → invoices → payments.** An invoice line always bills a line of its sale, never more than is left of it. Tracking is on the **taxable (pre-GST) amount**, which is exact: GST rounding differs slightly between the sale's estimate and an invoice (CGST and SGST are rounded separately and the total is rounded to the rupee), the taxable amount does not. Drafts reserve their amount; deleting a draft or cancelling an invoice frees it. The last instalment takes the exact remainder, so three instalments always add up to the sale to the paisa.
+- **Only a confirmed sale can be invoiced.** A sale can be completed only when it is fully billed, and cancelled only when it has no live invoices and no unallocated advance. Billed sale items cannot be removed or reduced below what is billed; new items can be added.
+- **Billing in parts:** bill everything left, a percentage of the order, a fixed amount (before GST, split in proportion across the sale's lines, each keeping its own GST rate), or an instalment from the sale's optional billing plan (percentage or amount, with a due date).
+- **Sale-level figures are derived, never typed in.** *Billed* = issued invoices; *Paid* = payments allocated to them + the sale's unallocated advance; *Due on invoices* = billed − allocated payments; *Still to bill* = the part of the order not yet on an issued invoice (an estimate incl. GST); *Balance remaining* = billed + still to bill − paid.
+- **Advance:** a payment recorded for a sale keeps its allocations at invoice level (append-only, as before); what is not allocated is the sale's advance. "Apply advance" allocates it to the sale's issued invoices, oldest due first. It is never applied silently.
 - **Invoice numbers** `PREFIX/FY/0001` (FY = April-March of the invoice date), allocated inside the issuing transaction from a locked counter: no duplicates under concurrency, and a failed issue does not burn a number. Drafts have no number.
 - **GST:** place of supply (default: the client's state) vs your company state → CGST+SGST (same state) or IGST. Rate is per line. CGST and SGST are each rounded separately; the grand total can be rounded to the rupee with an explicit round-off line.
 - **Snapshots:** an issued invoice stores the client's and your company's details as they were; items store their own description, price and tax. Later edits to clients, products or settings never change it.
 - **Payment status is derived** from allocations (never typed in). *Collected* = payments received (not voided); *Invoiced* = issued invoices; *Outstanding* = invoiced − allocated payments; *Advance* = received but unallocated. The dashboard keeps these separate.
+- **Dropdown options:** records store an option's key, so renaming a label updates every screen without touching data; options in use can be hidden but not deleted, and built-in ones can never be deleted.
 - **Licenses:** "expired" is derived (an active license past its expiry date), so it can never be stale.
 - **Corrections:** invoices are cancelled with a reason; payments are voided with a reason; allocations are reversed. Nothing is deleted.
 
 ## Known limitations
 
-- **Accountant sign-off needed** for: treatment of advance payments (they are recorded as receipts + unallocated payments, not tax invoices), credit-note handling (not built; cancel + re-issue instead), place-of-supply edge cases, round-off policy, and whether your invoice wording meets GST rules. TDS and e-invoicing/IRN are not handled.
+- **Accountant sign-off needed** for: treatment of advance payments (an advance is recorded as a receipt and held against the sale; under GST an *advance receipt voucher* may be required for services, and this app does not generate one), credit-note handling (not built; cancel + re-issue instead), place-of-supply edge cases, round-off policy, and whether your invoice wording meets GST rules. TDS and e-invoicing/IRN are not handled.
+- **"Fixed amount" billing is before GST.** If a client has agreed to pay a round figure including GST, use a percentage or check the invoice preview: the total is shown before you issue.
 - **No roles or permissions**: all users have full access. Add before giving access to anyone who should not see financials.
 - **Receipts** use the current company settings (they do not keep a snapshot like invoices do).
 - **PDF currency** prints "INR" (built-in fonts have no ₹ glyph); embed a font to change it.

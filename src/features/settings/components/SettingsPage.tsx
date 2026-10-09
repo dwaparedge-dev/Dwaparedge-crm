@@ -11,6 +11,8 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Grid from "@mui/material/Grid";
 import MenuItem from "@mui/material/MenuItem";
 import Skeleton from "@mui/material/Skeleton";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useNotify } from "@/components/common/Notify";
@@ -19,6 +21,7 @@ import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
 import { INDIAN_STATES } from "@/lib/india";
+import { OptionsManager } from "@/features/options/components/OptionsManager";
 import type { CompanySettings } from "../service";
 
 interface Values {
@@ -122,10 +125,15 @@ function SettingsForm({ initial, onSaved }: { initial: Values; onSaved: () => vo
 
 export function SettingsPage() {
   const { data, error, loading, reload } = useFetch<CompanySettings>("/api/settings");
+  const [tab, setTab] = useState(0);
   return (
     <>
       <PageHeader title="Settings" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Settings" }]} />
-      {error ? <ErrorState message={error} onRetry={reload} /> : loading || !data ? <Skeleton variant="rounded" height={420} /> : <SettingsForm key={data.updated_at} initial={toValues(data)} onSaved={reload} />}
+      <Tabs value={tab} onChange={(_, v: number) => setTab(v)} sx={{ mb: 2 }}>
+        <Tab label="Company & invoices" />
+        <Tab label="Dropdown options" />
+      </Tabs>
+      {tab === 1 ? <OptionsManager /> : error ? <ErrorState message={error} onRetry={reload} /> : loading || !data ? <Skeleton variant="rounded" height={420} /> : <SettingsForm key={data.updated_at} initial={toValues(data)} onSaved={reload} />}
     </>
   );
 }

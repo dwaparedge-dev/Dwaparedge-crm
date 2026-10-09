@@ -1,6 +1,5 @@
 import "server-only";
 import { amountInWordsINR } from "@/lib/words";
-import { PAYMENT_METHOD_LABELS } from "@/features/payments/schema";
 import type { CompanySettings } from "@/features/settings/service";
 import type { AllocationRow, PaymentRow } from "@/features/payments/service";
 import { COLORS, dmy, joinLines, money, newDoc, toBuffer, watermark } from "./common";
@@ -8,7 +7,7 @@ import { COLORS, dmy, joinLines, money, newDoc, toBuffer, watermark } from "./co
 const L = 36;
 const W = 523;
 
-export async function buildReceiptPdf(args: { payment: PaymentRow; allocations: AllocationRow[]; company: CompanySettings; clientName: string }): Promise<Buffer> {
+export async function buildReceiptPdf(args: { payment: PaymentRow; allocations: AllocationRow[]; company: CompanySettings; clientName: string; methodLabel: string }): Promise<Buffer> {
   const { payment: p, company: c } = args;
   const doc = newDoc(`Receipt ${p.receipt_number}`);
   doc.fillColor(COLORS.ink).font("Helvetica-Bold").fontSize(16).text(c.trade_name || c.legal_name, L, 36, { width: 330 });
@@ -22,7 +21,7 @@ export async function buildReceiptPdf(args: { payment: PaymentRow; allocations: 
   doc.roundedRect(L, y, W, 96, 4).strokeColor(COLORS.line).lineWidth(0.8).stroke();
   const rows: Array<[string, string]> = [
     ["Receipt No.", p.receipt_number], ["Date", dmy(p.payment_date)], ["Received from", args.clientName],
-    ["Payment method", PAYMENT_METHOD_LABELS[p.method as keyof typeof PAYMENT_METHOD_LABELS] ?? p.method], ["Reference", p.reference ?? "-"],
+    ["Payment method", args.methodLabel], ["Reference", p.reference ?? "-"],
   ];
   let ry = y + 9;
   for (const [k, v] of rows) {

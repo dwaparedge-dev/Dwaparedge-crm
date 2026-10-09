@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import type { z } from "zod";
 import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
+import { resolveOption } from "@/features/options/service";
 import { AppError } from "@/lib/auth/errors";
 import { likePattern } from "@/lib/validation";
 import { todayIST } from "@/lib/dates";
@@ -102,8 +103,10 @@ export async function getLicense(id: string) {
   const row = await db.queryOne<LicenseRow>(`${SELECT} WHERE l.id = $1`, [id]);
   if (!row) throw new AppError("License not found", 404, "NOT_FOUND");
   const events = await db.query<LicenseEventRow>(
-    `SELECT e.id, e.event_type, e.from_status, e.to_status, e.details, e.note, u.name AS actor_name, e.created_at
-     FROM license_events e LEFT JOIN users u ON u.id = e.actor_id WHERE e.license_id = $1 ORDER BY e.created_at DESC, e.id DESC`,
+    `SELECT a.id, a.action AS event_type, a.metadata->>'from' AS from_status, a.metadata->>'to' AS to_status, a.metadata AS details,
+            a.metadata->>'note' AS note, u.name AS actor_name, a.created_at
+     FROM activity_log a LEFT JOIN users u ON u.id = a.actor_id
+     WHERE a.entity_type = 'license' AND a.entity_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
     [id],
   );
   return { ...row, days_remaining: Number(row.days_remaining), events };
@@ -120,11 +123,11 @@ async function addEvent(
   tx: PoolClient,
   e: { licenseId: string; clientId: string; type: string; from?: string | null; to?: string | null; details?: Record<string, unknown>; note?: string | null; actorId: string; summary: string },
 ) {
-  await tx.query(
-    `INSERT INTO license_events (license_id, event_type, from_status, to_status, details, note, actor_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [e.licenseId, e.type, e.from ?? null, e.to ?? null, e.details ? JSON.stringify(e.details) : null, e.note ?? null, e.actorId],
-  );
-  await logActivity({ entityType: "license", entityId: e.licenseId, clientId: e.clientId, action: e.type, summary: e.summary, actorId: e.actorId, metadata: e.details }, tx);
+  // The license history is the activity log filtered to this license; status change and note ride in metadata.
+  await logActivity({
+    entityType: "license", entityId: e.licenseId, clientId: e.clientId, action: e.type, summary: e.summary, actorId: e.actorId,
+    metadata: { ...e.details, ...(e.from ? { from: e.from } : {}), ...(e.to ? { to: e.to } : {}), ...(e.note ? { note: e.note } : {}) },
+  }, tx);
 }
 
 async function assertClientAndProduct(tx: PoolClient, input: LicenseInput) {
@@ -137,6 +140,7 @@ async function assertClientAndProduct(tx: PoolClient, input: LicenseInput) {
 
 export async function createLicense(input: LicenseInput, actorId: string) {
   return db.transaction(async (tx) => {
+    input = { ...input, plan: await resolveOption("licenses", "plan", input.plan, tx) };
     await assertClientAndProduct(tx, input);
     for (let attempt = 0; attempt < 5; attempt++) {
       const identifier = generateIdentifier();
@@ -164,6 +168,7 @@ export async function createLicense(input: LicenseInput, actorId: string) {
 /** Edits descriptive fields. Client and product are fixed once issued; dates change through renew. */
 export async function updateLicense(id: string, input: LicenseInput, actorId: string) {
   await db.transaction(async (tx) => {
+    input = { ...input, plan: await resolveOption("licenses", "plan", input.plan, tx, { allowInactive: true }) };
     const cur = await tx.query<{ status: string; client_id: string; product_id: string; license_identifier: string; start_date: string; expiry_date: string }>(
       `SELECT status, client_id, product_id, license_identifier, to_char(start_date,'YYYY-MM-DD') AS start_date, to_char(expiry_date,'YYYY-MM-DD') AS expiry_date
        FROM licenses WHERE id = $1 FOR UPDATE`,

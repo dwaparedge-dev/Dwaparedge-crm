@@ -14,8 +14,7 @@ import { ClientPicker } from "@/components/common/ClientPicker";
 import { LineItemsEditor, EMPTY_LINE, useItemsTotals, type ItemsForm, type LineItem } from "@/components/forms/LineItemsEditor";
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
-import { SALE_TYPES } from "../schema";
-import { SALE_TYPE_LABELS } from "./common";
+import { OptionSelect } from "@/features/options/components/OptionSelect";
 
 export type SaleFormItem = LineItem;
 export interface SaleFormValues {
@@ -84,10 +83,8 @@ export function SaleForm({ initial, saleId, lockClient, onSaved, onCancel }: Pro
               )} />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
-              <Controller name="type" control={control} render={({ field }) => (
-                <TextField select label="Sale type" fullWidth {...field}>
-                  {SALE_TYPES.map((t) => <MenuItem key={t} value={t}>{SALE_TYPE_LABELS[t]}</MenuItem>)}
-                </TextField>
+              <Controller name="type" control={control} rules={{ required: "Select a sale type" }} render={({ field, fieldState }) => (
+                <OptionSelect table="sales" column="type" label="Sale type" required value={field.value} onChange={field.onChange} error={fieldState.error?.message} />
               )} />
             </Grid>
             <Grid size={12}>
