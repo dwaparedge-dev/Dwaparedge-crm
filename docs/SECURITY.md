@@ -13,7 +13,7 @@
 - **Errors:** unexpected failures return a generic `500`; details only go to the server log.
 - **Audit trail:** `security_events` records sign-ins (ok, failed, locked), password changes and sign-outs with address and browser, kept 180 days. Read it with `npm run users -- events [--email ...]`.
 - **Browser hardening:** CSP (no third-party origins, no framing), HSTS, `nosniff`, `X-Frame-Options: DENY`, referrer and permissions policies, COOP/CORP, and `Cache-Control: private, no-store` on all `/api` responses.
-- **Supply chain:** Dependabot opens weekly update PRs; CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and `npm audit` on every push.
+- **Supply chain:** CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and `npm audit` on every push.
 
 ## The database
 - **Supabase's public REST API is closed.** Supabase exposes every `public` table to the anon key unless Row Level Security is on. `db/hardening.sql` (run at the end of every `npm run db:sync` / `db:migrate`) turns RLS on for every table with no policies and revokes the `anon` and `authenticated` roles. The app connects as the owner role, which is unaffected.
