@@ -25,6 +25,7 @@ export const saleInputSchema = z.object({
   saleDate: isoDate,
   expectedClose: z.preprocess((v) => (v === "" ? null : v), isoDate.nullable().default(null)),
   notes: optionalText(5000),
+  agreementRef: optionalText(100),
   items: z.array(saleItemSchema).min(1, "Add at least one item").max(100),
 });
 export type SaleInput = z.infer<typeof saleInputSchema>;
@@ -49,6 +50,7 @@ export const milestoneInputSchema = z
     percent: optionalDecimal(2, "Percentage"),
     amount: optionalDecimal(2, "Amount"),
     dueDate: z.preprocess((v) => (v === "" ? null : v), isoDate.nullable().default(null)),
+    description: optionalText(1500),
   })
   .superRefine((m, ctx) => {
     if (m.basis === "percent") {

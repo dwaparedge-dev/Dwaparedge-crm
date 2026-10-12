@@ -25,6 +25,8 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   serverExternalPackages: ["pdfkit", "pg"],
+  // The invoice PDF reads its fonts from disk at runtime, which the file tracer cannot see on its own.
+  outputFileTracingIncludes: { "/api/invoices/\\[id\\]/pdf": ["./src/assets/fonts/*.ttf"] },
   poweredByHeader: false,
   async headers() {
     return [

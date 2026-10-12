@@ -77,7 +77,7 @@ export async function configureCompany(actorId: string, stateCode = "24") {
   const { settingsSchema } = await import("@/features/settings/schema");
   await updateSettings(
     settingsSchema.parse({
-      legalName: "Test Company Pvt Ltd", address: "1 Test Road", stateCode, invoicePrefix: "DE", receiptPrefix: "RCT", defaultDueDays: 15, roundOffTotal: true,
+      legalName: "Test Company Pvt Ltd", address: "1 Test Road", stateCode, receiptPrefix: "RCT", defaultDueDays: 15, roundOffTotal: true,
     }),
     actorId,
   );

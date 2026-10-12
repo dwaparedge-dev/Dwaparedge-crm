@@ -19,12 +19,14 @@ CREATE TABLE IF NOT EXISTS company_settings (
   bank_ifsc            TEXT,
   bank_branch          TEXT,
   upi_id               TEXT,
-  invoice_prefix       TEXT         NOT NULL DEFAULT 'DE',
+  invoice_prefix       TEXT         NOT NULL DEFAULT 'INV',  -- no longer used: invoice numbers always start with INV (src/lib/numbering.ts)
   receipt_prefix       TEXT         NOT NULL DEFAULT 'RCT',
   default_due_days     INTEGER      NOT NULL DEFAULT 15 CHECK (default_due_days >= 0),
   default_payment_terms TEXT,
   default_invoice_notes TEXT,
   signatory_name       TEXT,
   round_off_total      BOOLEAN      NOT NULL DEFAULT true,  -- round grand total to the nearest rupee
+  invoice_tagline      TEXT,        -- small line under the company name on the invoice header
+  invoice_declaration  TEXT,        -- optional declaration printed above the signatory; NULL = none
   updated_at           TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

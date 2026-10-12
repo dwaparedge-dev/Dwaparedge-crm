@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { format } from "date-fns";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
@@ -19,6 +20,7 @@ import PersonAddIcon from "@mui/icons-material/PersonAddAltOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import { SegmentedTabs } from "@/components/common/SegmentedTabs";
 import { useFetch } from "@/components/common/useFetch";
+import { stateNameByCode } from "@/lib/india";
 import type { ClientRow } from "../service";
 
 interface ListResponse {
@@ -26,6 +28,9 @@ interface ListResponse {
   total: number;
   summary: { current: number; archived: number; newThisMonth: number; withSales: number };
 }
+
+const dash = (v: string | null) => v || "—";
+const day = (v: string | null) => (v ? format(new Date(v), "dd MMM yyyy") : "—");
 
 function StatusChip({ archived }: { archived?: boolean }) {
   return archived ? <Chip size="small" label="Archived" /> : <Chip size="small" label="Active" color="success" variant="outlined" />;
@@ -49,7 +54,9 @@ export function ClientsList({ openNew = false }: { openNew?: boolean }) {
   if (debounced) qs.set("search", debounced);
   const { data, error, loading, reload } = useFetch<ListResponse>(`/api/clients?${qs}`);
 
+  // One column per client field; the column picker (gear, bottom left) hides or reorders them.
   const columns: GridColDef<ClientRow>[] = [
+    { field: "code", headerName: "Code", width: 100, renderCell: ({ row: c }) => <Box sx={{ fontFamily: "monospace", fontWeight: 600 }}>{c.code ?? "—"}</Box> },
     {
       field: "display_name", headerName: "Client", minWidth: 220,
       renderCell: ({ row: c }) => (
@@ -59,17 +66,20 @@ export function ClientsList({ openNew = false }: { openNew?: boolean }) {
         </Box>
       ),
     },
-    { field: "gstin", headerName: "GSTIN", width: 170, valueFormatter: (v: string | null) => v ?? "—" },
-    {
-      field: "email", headerName: "Contact", minWidth: 200,
-      renderCell: ({ row: c }) => (
-        <Box sx={{ minWidth: 0 }}>
-          {c.email ?? "—"}
-          {c.phone && <Box sx={{ color: "text.secondary", fontSize: 13 }}>{c.phone}</Box>}
-        </Box>
-      ),
-    },
-    { field: "owner_name", headerName: "Owner", width: 150, valueFormatter: (v: string | null) => v ?? "—" },
+    { field: "gstin", headerName: "GSTIN", width: 170, valueFormatter: dash },
+    { field: "pan", headerName: "PAN", width: 130, valueFormatter: dash },
+    { field: "email", headerName: "Email", minWidth: 200, valueFormatter: dash },
+    { field: "phone", headerName: "Phone", width: 150, valueFormatter: dash },
+    { field: "billing_address", headerName: "Billing address", minWidth: 240, valueFormatter: dash },
+    { field: "shipping_address", headerName: "Shipping address", minWidth: 240, valueFormatter: dash },
+    { field: "city", headerName: "City", width: 130, valueFormatter: dash },
+    { field: "state_code", headerName: "State", width: 160, valueGetter: (_v, c) => (c.state_code ? `${stateNameByCode(c.state_code) ?? ""} (${c.state_code})` : null), valueFormatter: dash },
+    { field: "postal_code", headerName: "Postal code", width: 120, valueFormatter: dash },
+    { field: "country", headerName: "Country", width: 110, valueFormatter: dash },
+    { field: "owner_name", headerName: "Owner", width: 150, valueFormatter: (v: string | null) => v ?? "Unassigned" },
+    { field: "notes", headerName: "Notes", minWidth: 200, valueFormatter: dash },
+    { field: "created_at", headerName: "Created", width: 120, valueFormatter: day },
+    { field: "updated_at", headerName: "Updated", width: 120, valueFormatter: day },
     { field: "archived_at", headerName: "Status", width: 110, renderCell: ({ row: c }) => <StatusChip archived={c.archived_at !== null} /> },
   ];
 
@@ -88,7 +98,7 @@ export function ClientsList({ openNew = false }: { openNew?: boolean }) {
       ]} />
       <ListLayout
         onRefresh={reload} refreshing={loading}
-        search={{ value: search, onChange: setSearch, placeholder: "Search name, GSTIN, email, phone, city", label: "Search clients" }}
+        search={{ value: search, onChange: setSearch, placeholder: "Search code, name, GSTIN, PAN, email, phone, city", label: "Search clients" }}
         tabs={<SegmentedTabs label="Client list" value={archived} onChange={(v) => { setArchived(v); setPage(0); }} tabs={[{ value: "false", label: "Current" }, { value: "true", label: "Archived" }]} />}
       >
         {error ? <Box sx={{ p: 2 }}><ErrorState message={error} onRetry={reload} /></Box> : (

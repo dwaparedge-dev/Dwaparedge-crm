@@ -287,3 +287,86 @@ describe("payments in parts and the remaining balance", () => {
     expect(r.items.map((p) => p.applied_to_sale).sort()).toEqual(["0.00", "1180.00"]);
   });
 });
+
+describe("the invoice's document snapshot", () => {
+  async function issuedMilestoneInvoice() {
+    const { db } = await import("@/lib/db");
+    const { replaceMilestones, getSale } = await import("@/features/sales/service");
+    const { milestonesSchema } = await import("@/features/sales/schema");
+    const saleId = await confirmedSale(actor, client, [LINE("10000", "18")]);
+    await db.query("UPDATE sales SET agreement_ref = 'SOW-1' WHERE id = $1", [saleId]); // the quotation number is generated with the sale
+    await replaceMilestones(saleId, milestonesSchema.parse({ milestones: [
+      { title: "Kickoff", basis: "percent", percent: "40", description: "Discovery workshops" },
+      { title: "Go-live", basis: "percent", percent: "60" },
+    ] }).milestones, actor);
+    const milestoneId = (await getSale(saleId)).milestones[0]!.id;
+    const id = await bill(actor, saleId, { mode: "milestone", milestoneId });
+    await issue(id);
+    return { saleId, id, milestoneId };
+  }
+
+  it("records the project references, the billed milestone and where the contract stands", async () => {
+    const { id } = await issuedMilestoneInvoice();
+    const snap = (await inv(id)).document_snapshot!;
+    expect(snap.sale).toMatchObject({ quotationNumber: expect.stringMatching(/^QT-\d{4}-[A-Z]{2}\d{2}-\d{2}$/), agreementRef: "SOW-1" });
+    expect(snap.milestone).toMatchObject({ position: 1, title: "Kickoff", description: "Discovery workshops", share: "40.00" });
+    expect(snap.statement).toMatchObject({ contractValue: "10000.00", billedBefore: "0.00", thisInvoice: "4000.00", balanceToBill: "6000.00" });
+    expect(snap.statement.schedule.map((s) => s.current)).toEqual([true, false]);
+  });
+
+  it("does not change when the sale or its plan is edited afterwards, and the database refuses to alter it", async () => {
+    const { db } = await import("@/lib/db");
+    const { replaceMilestones, getSale } = await import("@/features/sales/service");
+    const { milestonesSchema } = await import("@/features/sales/schema");
+    const { id, saleId, milestoneId } = await issuedMilestoneInvoice();
+    const before = (await inv(id)).document_snapshot;
+    await db.query("UPDATE sales SET quotation_number = 'CHANGED', agreement_ref = 'CHANGED' WHERE id = $1", [saleId]);
+    const m = (await getSale(saleId)).milestones;
+    await replaceMilestones(saleId, milestonesSchema.parse({ milestones: [
+      { id: milestoneId, title: m[0]!.title, basis: "percent", percent: "40", description: "Rewritten deliverables" },
+      { id: m[1]!.id, title: "Go-live", basis: "percent", percent: "60" },
+    ] }).milestones, actor);
+    expect((await inv(id)).document_snapshot).toEqual(before);
+    await expect(db.query("UPDATE invoices SET document_snapshot = '{}'::jsonb WHERE id = $1", [id])).rejects.toThrow(/immutable/);
+  });
+
+  it("counts earlier issued invoices in the next milestone's balance", async () => {
+    const { saleId } = await issuedMilestoneInvoice();
+    const { getSale } = await import("@/features/sales/service");
+    const second = (await getSale(saleId)).milestones[1]!.id;
+    const id = await bill(actor, saleId, { mode: "milestone", milestoneId: second });
+    await issue(id);
+    const snap = (await inv(id)).document_snapshot!;
+    expect(snap.statement).toMatchObject({ billedBefore: "4000.00", thisInvoice: "6000.00", balanceToBill: "0.00" });
+  });
+
+  it("renders the same invoice after the client, the company settings, the sale and the plan are all edited", async () => {
+    const { db } = await import("@/lib/db");
+    const { getInvoice, getInvoiceRenderContext } = await import("@/features/invoices/service");
+    const { updateClient } = await import("@/features/clients/service");
+    const { clientInputSchema } = await import("@/features/clients/schema");
+    const { replaceMilestones, getSale } = await import("@/features/sales/service");
+    const { milestonesSchema } = await import("@/features/sales/schema");
+    const { buildInvoicePdf } = await import("@/lib/pdf/invoice");
+    const { id, saleId, milestoneId } = await issuedMilestoneInvoice();
+    const render = async () => {
+      const { items, allocations, ...invoice } = await getInvoice(id);
+      void allocations;
+      const { company, client, document } = await getInvoiceRenderContext(invoice);
+      return buildInvoicePdf({ invoice, items, company, client, document });
+    };
+    const before = await render();
+
+    const clientId = (await getInvoice(id)).client_id;
+    await updateClient(clientId, clientInputSchema.parse({ legalName: "Renamed Ltd", billingAddress: "Elsewhere", stateCode: "27", gstin: "" }), actor);
+    await db.query("UPDATE company_settings SET legal_name = 'Other Co', address = 'New place', bank_account_number = '999', invoice_tagline = 'changed', signatory_name = 'Someone Else' WHERE id = 1");
+    await db.query("UPDATE sales SET title = 'Retitled', agreement_ref = 'CHANGED' WHERE id = $1", [saleId]);
+    const m = (await getSale(saleId)).milestones;
+    await replaceMilestones(saleId, milestonesSchema.parse({ milestones: [
+      { id: milestoneId, title: m[0]!.title, basis: "percent", percent: "40", description: "Rewritten deliverables" },
+      { id: m[1]!.id, title: "Renamed go-live", basis: "percent", percent: "60" },
+    ] }).milestones, actor);
+
+    expect((await render()).equals(before)).toBe(true);
+  });
+});

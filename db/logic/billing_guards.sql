@@ -15,12 +15,12 @@ BEGIN
   END IF;
   IF ROW(NEW.invoice_number, NEW.client_id, NEW.sale_id, NEW.issue_date, NEW.due_date, NEW.currency,
          NEW.place_of_supply_state_code, NEW.supply_type, NEW.subtotal, NEW.cgst_total, NEW.sgst_total, NEW.igst_total,
-         NEW.tax_total, NEW.round_off, NEW.total, NEW.payment_terms, NEW.notes, NEW.client_snapshot, NEW.company_snapshot,
+         NEW.tax_total, NEW.round_off, NEW.total, NEW.payment_terms, NEW.notes, NEW.client_snapshot, NEW.company_snapshot, NEW.document_snapshot,
          NEW.issued_at, NEW.issued_by)
      IS DISTINCT FROM
      ROW(OLD.invoice_number, OLD.client_id, OLD.sale_id, OLD.issue_date, OLD.due_date, OLD.currency,
          OLD.place_of_supply_state_code, OLD.supply_type, OLD.subtotal, OLD.cgst_total, OLD.sgst_total, OLD.igst_total,
-         OLD.tax_total, OLD.round_off, OLD.total, OLD.payment_terms, OLD.notes, OLD.client_snapshot, OLD.company_snapshot,
+         OLD.tax_total, OLD.round_off, OLD.total, OLD.payment_terms, OLD.notes, OLD.client_snapshot, OLD.company_snapshot, OLD.document_snapshot,
          OLD.issued_at, OLD.issued_by) THEN
     RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
   END IF;

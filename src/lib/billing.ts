@@ -71,3 +71,72 @@ export function milestoneTaxable(m: { basis: "percent" | "amount"; percent: stri
   if (m.basis === "amount") return parseScaled(m.amount ?? "0", 2);
   return divRound(parseScaled(saleTaxable, 2) * parseScaled(m.percent ?? "0", 2), 10000n);
 }
+
+export interface ScheduleEntry {
+  position: number;
+  title: string;
+  /** Share of the contract value as a percentage ("15.00"); derived from the amount for amount-based milestones. */
+  share: string;
+  /** Before GST, "1234.56". */
+  taxable: string;
+  /** True for the milestone the invoice bills. */
+  current: boolean;
+}
+
+/** The "where are we on this contract" figures recorded with each issued invoice. All before GST. */
+export interface BillingStatement {
+  contractValue: string;
+  /** Issued invoices of the sale, not counting this one. */
+  billedBefore: string;
+  thisInvoice: string;
+  billedToDate: string;
+  /** Contract value not yet on any issued invoice; never negative. */
+  balanceToBill: string;
+  schedule: ScheduleEntry[];
+  scheduleTotal: string;
+  scheduleShare: string;
+}
+
+export function buildBillingStatement(input: {
+  contractValue: string;
+  billedBefore: string;
+  thisInvoice: string;
+  milestones: Array<{ position: number; title: string; basis: "percent" | "amount"; percent: string | null; taxable: string; id: string }>;
+  currentMilestoneId: string | null;
+}): BillingStatement {
+  const contract = parseScaled(input.contractValue, 2, "Contract value");
+  const before = parseScaled(input.billedBefore, 2, "Billed before");
+  const now = parseScaled(input.thisInvoice, 2, "This invoice");
+  const toDate = before + now;
+  const share = (taxable: bigint) => (contract > 0n ? formatScaled(divRound(taxable * 10000n, contract), 2) : "0.00");
+  const schedule = input.milestones.map((m) => ({
+    position: m.position,
+    title: m.title,
+    share: m.basis === "percent" && m.percent ? formatScaled(parseScaled(m.percent, 2), 2) : share(parseScaled(m.taxable, 2)),
+    taxable: m.taxable,
+    current: m.id === input.currentMilestoneId,
+  }));
+  const total = input.milestones.reduce((a, m) => a + parseScaled(m.taxable, 2), 0n);
+  return {
+    contractValue: formatScaled(contract, 2),
+    billedBefore: formatScaled(before, 2),
+    thisInvoice: formatScaled(now, 2),
+    billedToDate: formatScaled(toDate, 2),
+    balanceToBill: formatScaled(contract > toDate ? contract - toDate : 0n, 2),
+    schedule,
+    scheduleTotal: formatScaled(total, 2),
+    scheduleShare: share(total),
+  };
+}
+
+/**
+ * Everything the invoice PDF prints beyond the lines, frozen when the invoice is issued so later edits to
+ * the sale or its billing plan never rewrite an issued invoice. `milestone` is null for an invoice that
+ * does not bill a planned milestone.
+ */
+export interface DocumentSnapshot {
+  version: 1;
+  sale: { number: string; title: string; quotationNumber: string | null; agreementRef: string | null };
+  milestone: { position: number; title: string; description: string | null; share: string } | null;
+  statement: BillingStatement;
+}

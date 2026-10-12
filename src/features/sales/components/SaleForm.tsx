@@ -24,11 +24,12 @@ export interface SaleFormValues {
   saleDate: string;
   expectedClose: string;
   notes: string;
+  agreementRef: string;
   items: SaleFormItem[];
 }
 
 export const emptySale = (clientId = ""): SaleFormValues => ({
-  clientId, type: "license", title: "", ownerId: "", saleDate: new Date().toISOString().slice(0, 10), expectedClose: "", notes: "", items: [{ ...EMPTY_LINE }],
+  clientId, type: "license", title: "", ownerId: "", saleDate: new Date().toISOString().slice(0, 10), expectedClose: "", notes: "", agreementRef: "", items: [{ ...EMPTY_LINE }],
 });
 
 interface Props {
@@ -103,6 +104,9 @@ export function SaleForm({ open, initial, saleId, lockClient, onSaved, onCancel 
                   {owners.data?.items.map((u) => <MenuItem key={u.id} value={u.id}>{u.name}</MenuItem>)}
                 </TextField>
               )} />
+            </Grid>
+            <Grid size={12}>
+              <TextField label="Agreement / SOW reference" fullWidth helperText="Printed on the invoice. The sale and quotation numbers are generated automatically." {...register("agreementRef")} />
             </Grid>
           </Grid>
         </CardContent>

@@ -125,6 +125,7 @@ export function SaleDetail({ id }: { id: string }) {
             attributes={[
               { label: "Client", value: <Link href={`/clients/${s.client_id}`} style={{ color: "inherit", fontWeight: 600 }}>{s.client_name}</Link> },
               { label: "Type", value: <OptionLabel table="sales" column="type" value={s.type} /> },
+              { label: "Quotation no.", value: s.quotation_number ?? "—", isMonospace: true },
               { label: "Owner", value: s.owner_name ?? "Unassigned" },
               { label: "Sale date", value: format(new Date(s.sale_date), "dd MMM yyyy") },
               { label: "Expected closing", value: s.expected_close ? format(new Date(s.expected_close), "dd MMM yyyy") : "—" },

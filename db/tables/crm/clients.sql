@@ -1,6 +1,7 @@
 -- Table: clients
 CREATE TABLE IF NOT EXISTS clients (
   id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  code             TEXT,       -- permanent AA01, AA02 ... used in sale/quotation/invoice numbers (unique index: migration 0013)
   legal_name       TEXT        NOT NULL,
   display_name     TEXT        NOT NULL,
   gstin            TEXT,

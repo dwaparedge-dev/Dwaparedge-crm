@@ -9,6 +9,7 @@ type SaleDetail = SaleRow & { items: SaleItemRow[] };
 
 const toForm = (s: SaleDetail): SaleFormValues => ({
   clientId: s.client_id, type: s.type, title: s.title, ownerId: s.owner_id ?? "", saleDate: s.sale_date, expectedClose: s.expected_close ?? "", notes: s.notes ?? "",
+  agreementRef: s.agreement_ref ?? "",
   items: s.items.map((i) => ({
     itemId: i.id,
     billed: String(Number(i.issued_taxable) + Number(i.draft_taxable)),

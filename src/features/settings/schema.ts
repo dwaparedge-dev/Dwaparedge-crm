@@ -21,12 +21,13 @@ export const settingsSchema = z
     bankIfsc: optionalText(20),
     bankBranch: optionalText(200),
     upiId: optionalText(100),
-    invoicePrefix: z.string().trim().min(1, "Required").max(10).regex(/^[A-Za-z0-9-]+$/, "Letters, numbers and dashes only"),
     receiptPrefix: z.string().trim().min(1, "Required").max(10).regex(/^[A-Za-z0-9-]+$/, "Letters, numbers and dashes only"),
     defaultDueDays: z.coerce.number().int().min(0).max(365),
     defaultPaymentTerms: optionalText(1000),
     defaultInvoiceNotes: optionalText(2000),
     signatoryName: optionalText(200),
+    invoiceTagline: optionalText(120),
+    invoiceDeclaration: optionalText(1000),
     roundOffTotal: z.boolean(),
   })
   .superRefine((v, ctx) => {

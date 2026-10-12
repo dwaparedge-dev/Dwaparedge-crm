@@ -45,7 +45,7 @@ Mutating requests (`POST/PUT/PATCH/DELETE`) must send `Content-Type: application
 | `/api/invoices/{id}` | GET, PATCH, DELETE | PATCH/DELETE only for drafts |
 | `/api/invoices/{id}/issue` | POST | Assigns the number; makes the invoice permanent |
 | `/api/invoices/{id}/cancel` | POST | `{reason}`; refused while payments are allocated |
-| `/api/invoices/{id}/pdf` | GET | `application/pdf`; `?download=1` for attachment |
+| `/api/invoices/{id}/pdf` | GET | `application/pdf`; `?download=1` for attachment. One page for a normal invoice; a long one continues onto further pages |
 | `/api/payments` | GET, POST | POST may include `saleId` (tag the payment to a sale; unallocated money becomes its advance) and `allocations: [{invoiceId, amount}]`. GET filter `saleId` lists payments tagged to the sale or allocated to its invoices (with `applied_to_sale`) |
 | `/api/payments/{id}` | GET | Includes allocations |
 | `/api/payments/{id}/allocations` | POST | `{allocations: [...]}` |

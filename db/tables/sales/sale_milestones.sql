@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS sale_milestones (
   percent    NUMERIC(5,2)  CHECK (percent > 0 AND percent <= 100),
   amount     NUMERIC(14,2) CHECK (amount > 0),
   due_date   DATE,
+  description TEXT,  -- deliverables, printed on the invoice that bills this milestone
   invoice_id UUID          REFERENCES invoices(id) ON DELETE SET NULL,  -- deleting a draft returns the milestone to "planned"
   created_at TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ   NOT NULL DEFAULT now(),

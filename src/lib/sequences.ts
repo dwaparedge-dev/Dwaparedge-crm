@@ -1,5 +1,6 @@
 import "server-only";
 import { query, type Queryable } from "@/lib/db";
+import { clientCodeFromIndex } from "@/lib/numbering";
 
 /**
  * Allocates the next number for (docType, scope). Must run inside the same transaction that
@@ -16,4 +17,17 @@ export async function nextSequence(docType: string, scope: string, tx: Queryable
     tx,
   );
   return rows[0]!.last_value;
+}
+
+/**
+ * The client's permanent code (AA01, AA02 ...), assigned the first time it is needed. Locks the client row, so two
+ * transactions cannot give the same client two codes, and runs in the caller's transaction like nextSequence.
+ */
+export async function ensureClientCode(clientId: string, tx: Queryable): Promise<string> {
+  const row = (await query<{ code: string | null }>("SELECT code FROM clients WHERE id = $1 FOR UPDATE", [clientId], tx))[0];
+  if (!row) throw new Error("Client not found");
+  if (row.code) return row.code;
+  const code = clientCodeFromIndex(await nextSequence("client_code", "", tx));
+  await query("UPDATE clients SET code = $1 WHERE id = $2", [code, clientId], tx);
+  return code;
 }

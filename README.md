@@ -166,7 +166,7 @@ npm run test:db  # integration tests against the real database engine
 
 `test:db` creates a throwaway schema `vt_<random>` in the database from `DATABASE_URL`, applies the migrations inside it, runs the tests, and drops it. It **never touches real data** (the app refuses any `DB_SEARCH_PATH` that isn't `vt_*`). Over a remote database it takes several minutes (latency); against a local Postgres it takes seconds.
 
-It covers: GST split and rounding, invoice numbering under concurrency (gap-free, per financial year), issued-invoice immutability (service and raw SQL), partial/multi-invoice allocations, invalid and **simultaneous** allocations, reversal/void rules, license lifecycle and derived expiry, duplicate detection, primary-contact rules, login lock-out, session revocation, forged tokens, CSRF, and "every endpoint requires a login".
+It covers: GST split and rounding, invoice numbering under concurrency (gap-free per client per month), issued-invoice immutability (service and raw SQL), partial/multi-invoice allocations, invalid and **simultaneous** allocations, reversal/void rules, license lifecycle and derived expiry, duplicate detection, primary-contact rules, login lock-out, session revocation, forged tokens, CSRF, and "every endpoint requires a login".
 
 ## Architecture
 
@@ -210,7 +210,8 @@ Route handlers are thin: parse with Zod → `requireUser()` → call a service �
 - **"Fixed amount" billing is before GST.** If a client has agreed to pay a round figure including GST, use a percentage or check the invoice preview: the total is shown before you issue.
 - **No roles or permissions**: all users have full access. Add before giving access to anyone who should not see financials.
 - **Receipts** use the current company settings (they do not keep a snapshot like invoices do).
-- **PDF currency** prints "INR" (built-in fonts have no ₹ glyph); embed a font to change it.
+- **An issued invoice never changes.** Its PDF is built from details frozen when it was issued (your company, the client, the project and milestone, the lines and totals), so editing or archiving the client, changing Settings, or editing the sale afterwards cannot alter it. It does not show payments, so recording one does not change it either (payments are tracked on the invoice page). The only thing that can change its look is a cancellation watermark.
+- **Invoices issued before the milestone-format update** have no document snapshot, so their PDF shows the new layout without the project references (issued invoices are immutable and cannot be back-filled).
 - **No email**: PDFs are viewed or downloaded and sent by hand.
 - **No scheduled jobs**: renewal and overdue reminders are dashboard alerts, not notifications.
 - **Single currency (INR)**, single company.

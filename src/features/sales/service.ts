@@ -7,7 +7,8 @@ import { resolveOption } from "@/features/options/service";
 import { AppError } from "@/lib/auth/errors";
 import { milestoneTaxable } from "@/lib/billing";
 import { computeLine, formatScaled, parseScaled, sumAmounts } from "@/lib/money";
-import { nextSequence } from "@/lib/sequences";
+import { ensureClientCode, nextSequence } from "@/lib/sequences";
+import { monthScope, quotationNumber, saleNumber } from "@/lib/numbering";
 import { likePattern } from "@/lib/validation";
 import type { MilestoneInput, SaleInput, listSalesSchema } from "./schema";
 
@@ -29,6 +30,8 @@ export interface SaleRow {
   tax_total: string;
   total: string;
   notes: string | null;
+  quotation_number: string | null;
+  agreement_ref: string | null;
   created_at: string;
   updated_at: string;
   // Derived from invoices, allocations and tagged payments (see the sale_billing view).
@@ -69,6 +72,7 @@ export interface MilestoneRow {
   percent: string | null;
   amount: string | null;
   due_date: string | null;
+  description: string | null;
   taxable: string;               // what the milestone stands for, before GST
   invoice_id: string | null;     // only set while that invoice is live (draft or issued)
   invoice_number: string | null;
@@ -81,7 +85,7 @@ const SELECT = `
   SELECT s.id, s.sale_number, s.client_id, c.display_name AS client_name, c.state_code AS client_state_code,
          s.type, s.title, s.status, s.owner_id, u.name AS owner_name,
          to_char(s.sale_date, 'YYYY-MM-DD') AS sale_date, to_char(s.expected_close, 'YYYY-MM-DD') AS expected_close,
-         s.currency, s.subtotal, s.tax_total, s.total, s.notes, s.created_at, s.updated_at,
+         s.currency, s.subtotal, s.tax_total, s.total, s.notes, s.quotation_number, s.agreement_ref, s.created_at, s.updated_at,
          sb.billed_total, sb.paid_on_invoices, sb.advance, (sb.paid_on_invoices + sb.advance) AS paid_total, sb.unbilled_estimate,
          GREATEST(sb.billed_total + sb.unbilled_estimate - sb.paid_on_invoices - sb.advance, 0.00) AS balance_remaining,
          GREATEST(sb.paid_on_invoices + sb.advance - sb.billed_total - sb.unbilled_estimate, 0.00) AS overpaid,
@@ -163,7 +167,7 @@ export const getSaleItems = (saleId: string, runner?: PoolClient) =>
 
 export async function getMilestones(saleId: string, saleTaxable: string, runner?: PoolClient): Promise<MilestoneRow[]> {
   const rows = await db.query<Omit<MilestoneRow, "taxable">>(
-    `SELECT m.id, m.position, m.title, m.basis, m.percent, m.amount, to_char(m.due_date,'YYYY-MM-DD') AS due_date,
+    `SELECT m.id, m.position, m.title, m.basis, m.percent, m.amount, to_char(m.due_date,'YYYY-MM-DD') AS due_date, m.description,
             CASE WHEN i.status IN ('draft','issued') THEN m.invoice_id END AS invoice_id,
             CASE WHEN i.status IN ('draft','issued') THEN i.invoice_number END AS invoice_number,
             CASE WHEN i.status IN ('draft','issued') THEN i.status END AS invoice_status,
@@ -222,12 +226,14 @@ export async function createSale(input: SaleInput, actorId: string) {
     if (client.rows[0]!.archived_at) throw new AppError("Cannot create a sale for an archived client", 422, "CLIENT_ARCHIVED");
     await assertProductsExist(tx, input.items);
 
-    const number = `SL-${String(await nextSequence("sale", "", tx)).padStart(4, "0")}`;
+    const code = await ensureClientCode(input.clientId, tx);
+    const number = saleNumber(code, await nextSequence("sale", code, tx));
+    const quotation = quotationNumber(input.saleDate, code, await nextSequence("quotation", monthScope(input.saleDate, code), tx));
     const { rows } = await tx.query<{ id: string }>(
-      `INSERT INTO sales (sale_number, client_id, type, title, owner_id, sale_date, expected_close, subtotal, tax_total, total, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      `INSERT INTO sales (sale_number, client_id, type, title, owner_id, sale_date, expected_close, subtotal, tax_total, total, notes, quotation_number, agreement_ref, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
       [number, input.clientId, input.type, input.title, input.ownerId, input.saleDate, input.expectedClose,
-        priced.subtotal, priced.taxTotal, priced.total, input.notes, actorId],
+        priced.subtotal, priced.taxTotal, priced.total, input.notes, quotation, input.agreementRef, actorId],
     );
     const id = rows[0]!.id;
     for (const [idx, it] of input.items.entries()) await tx.query(INSERT_ITEM, itemParams(id, idx + 1, it, priced.lines[idx]!));
@@ -293,8 +299,8 @@ export async function updateSale(id: string, input: SaleInput, actorId: string) 
       }
     }
     await tx.query(
-      `UPDATE sales SET type=$1, title=$2, owner_id=$3, sale_date=$4, expected_close=$5, subtotal=$6, tax_total=$7, total=$8, notes=$9, updated_at=now() WHERE id=$10`,
-      [input.type, input.title, input.ownerId, input.saleDate, input.expectedClose, priced.subtotal, priced.taxTotal, priced.total, input.notes, id],
+      `UPDATE sales SET type=$1, title=$2, owner_id=$3, sale_date=$4, expected_close=$5, subtotal=$6, tax_total=$7, total=$8, notes=$9, agreement_ref=$10, updated_at=now() WHERE id=$11`,
+      [input.type, input.title, input.ownerId, input.saleDate, input.expectedClose, priced.subtotal, priced.taxTotal, priced.total, input.notes, input.agreementRef, id],
     );
     await logActivity({ entityType: "sale", entityId: id, clientId: sale.client_id, action: "updated", summary: `Sale ${sale.sale_number} updated (total ${priced.total})`, actorId }, tx);
   });
@@ -368,12 +374,12 @@ export async function replaceMilestones(saleId: string, input: MilestoneInput[],
     for (const e of existing) if (!kept.has(e.id)) await tx.query("DELETE FROM sale_milestones WHERE id = $1", [e.id]);
     for (const [idx, m] of input.entries()) {
       if (m.id && byId.get(m.id)!.live) {
-        // Billed instalments keep their terms; only the order can change.
-        await tx.query("UPDATE sale_milestones SET position = $1, updated_at = now() WHERE id = $2", [idx + 1, m.id]);
+        // Billed instalments keep their terms; only the order and the deliverables text can change (an issued invoice has its own frozen copy).
+        await tx.query("UPDATE sale_milestones SET position = $1, description = $2, updated_at = now() WHERE id = $3", [idx + 1, m.description, m.id]);
       } else if (m.id) {
-        await tx.query("UPDATE sale_milestones SET position=$1, title=$2, basis=$3, percent=$4, amount=$5, due_date=$6, updated_at=now() WHERE id=$7", [idx + 1, m.title, m.basis, m.percent, m.amount, m.dueDate, m.id]);
+        await tx.query("UPDATE sale_milestones SET position=$1, title=$2, basis=$3, percent=$4, amount=$5, due_date=$6, description=$7, updated_at=now() WHERE id=$8", [idx + 1, m.title, m.basis, m.percent, m.amount, m.dueDate, m.description, m.id]);
       } else {
-        await tx.query("INSERT INTO sale_milestones (sale_id, position, title, basis, percent, amount, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7)", [saleId, idx + 1, m.title, m.basis, m.percent, m.amount, m.dueDate]);
+        await tx.query("INSERT INTO sale_milestones (sale_id, position, title, basis, percent, amount, due_date, description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [saleId, idx + 1, m.title, m.basis, m.percent, m.amount, m.dueDate, m.description]);
       }
     }
     await logActivity({ entityType: "sale", entityId: saleId, clientId: sale.client_id, action: "plan_updated", summary: `Billing plan of ${sale.sale_number} updated (${input.length} instalment${input.length === 1 ? "" : "s"})`, actorId }, tx);

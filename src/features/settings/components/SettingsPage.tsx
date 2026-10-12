@@ -27,16 +27,17 @@ import type { CompanySettings } from "../service";
 interface Values {
   legalName: string; tradeName: string; address: string; city: string; stateCode: string; postalCode: string; gstin: string; pan: string;
   email: string; phone: string; website: string; bankAccountName: string; bankName: string; bankAccountNumber: string; bankIfsc: string; bankBranch: string;
-  upiId: string; invoicePrefix: string; receiptPrefix: string; defaultDueDays: string; defaultPaymentTerms: string; defaultInvoiceNotes: string;
-  signatoryName: string; roundOffTotal: boolean;
+  upiId: string; receiptPrefix: string; defaultDueDays: string; defaultPaymentTerms: string; defaultInvoiceNotes: string;
+  signatoryName: string; roundOffTotal: boolean; invoiceTagline: string; invoiceDeclaration: string;
 }
 
 const toValues = (s: CompanySettings): Values => ({
   legalName: s.legal_name, tradeName: s.trade_name ?? "", address: s.address, city: s.city ?? "", stateCode: s.state_code ?? "", postalCode: s.postal_code ?? "",
   gstin: s.gstin ?? "", pan: s.pan ?? "", email: s.email ?? "", phone: s.phone ?? "", website: s.website ?? "", bankAccountName: s.bank_account_name ?? "",
   bankName: s.bank_name ?? "", bankAccountNumber: s.bank_account_number ?? "", bankIfsc: s.bank_ifsc ?? "", bankBranch: s.bank_branch ?? "", upiId: s.upi_id ?? "",
-  invoicePrefix: s.invoice_prefix, receiptPrefix: s.receipt_prefix, defaultDueDays: String(s.default_due_days), defaultPaymentTerms: s.default_payment_terms ?? "",
+  receiptPrefix: s.receipt_prefix, defaultDueDays: String(s.default_due_days), defaultPaymentTerms: s.default_payment_terms ?? "",
   defaultInvoiceNotes: s.default_invoice_notes ?? "", signatoryName: s.signatory_name ?? "", roundOffTotal: s.round_off_total,
+  invoiceTagline: s.invoice_tagline ?? "", invoiceDeclaration: s.invoice_declaration ?? "",
 });
 
 function SettingsForm({ initial, onSaved }: { initial: Values; onSaved: () => void }) {
@@ -106,10 +107,11 @@ function SettingsForm({ initial, onSaved }: { initial: Values; onSaved: () => vo
         <CardContent>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>Invoice defaults</Typography>
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, md: 3 }}><TextField label="Invoice number prefix" fullWidth {...register("invoicePrefix", { required: "Required" })} {...f("invoicePrefix")} helperText={errors.invoicePrefix?.message ?? "e.g. DE → DE/2026-27/0001. Numbers restart every April."} /></Grid>
             <Grid size={{ xs: 12, md: 3 }}><TextField label="Receipt number prefix" fullWidth {...register("receiptPrefix", { required: "Required" })} {...f("receiptPrefix")} /></Grid>
             <Grid size={{ xs: 12, md: 3 }}><TextField label="Default due (days)" fullWidth inputMode="numeric" {...register("defaultDueDays", { required: "Required", pattern: { value: /^\d+$/, message: "Whole number" } })} {...f("defaultDueDays")} /></Grid>
             <Grid size={{ xs: 12, md: 3 }}><TextField label="Authorised signatory" fullWidth {...register("signatoryName")} {...f("signatoryName")} /></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><TextField label="Invoice tagline" fullWidth {...register("invoiceTagline")} {...f("invoiceTagline")} helperText={errors.invoiceTagline?.message ?? "Small line under the company name on the invoice header"} /></Grid>
+            <Grid size={12}><TextField label="Invoice declaration" multiline minRows={2} fullWidth {...register("invoiceDeclaration")} {...f("invoiceDeclaration")} helperText={errors.invoiceDeclaration?.message ?? "Optional. When filled in, printed above the authorised signatory; leave blank to print nothing."} /></Grid>
             <Grid size={12}><TextField label="Default payment terms" multiline minRows={2} fullWidth {...register("defaultPaymentTerms")} {...f("defaultPaymentTerms")} /></Grid>
             <Grid size={12}><TextField label="Default invoice notes" multiline minRows={2} fullWidth {...register("defaultInvoiceNotes")} {...f("defaultInvoiceNotes")} /></Grid>
             <Grid size={12}><FormControlLabel control={<Checkbox {...register("roundOffTotal")} defaultChecked={initial.roundOffTotal} />} label="Round the invoice total to the nearest rupee (shown as a separate “Round off” line)" /></Grid>

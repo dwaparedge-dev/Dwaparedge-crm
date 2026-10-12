@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS sales (
   tax_total        NUMERIC(14,2) NOT NULL DEFAULT 0,
   total            NUMERIC(14,2) NOT NULL DEFAULT 0,
   notes            TEXT,
+  quotation_number TEXT,  -- shown on the invoice's Project & Agreement block
+  agreement_ref    TEXT,  -- contract / SOW reference, same block
   created_by       UUID          REFERENCES users(id) ON DELETE SET NULL,
   created_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ   NOT NULL DEFAULT now()

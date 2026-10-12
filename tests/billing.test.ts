@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { milestoneTaxable, planShares, type BillableItem } from "@/lib/billing";
+import { buildBillingStatement, milestoneTaxable, planShares, type BillableItem } from "@/lib/billing";
 import { formatScaled, parseScaled } from "@/lib/money";
 
 const item = (id: string, taxable: string, remaining = taxable): BillableItem => ({ id, taxable, remaining });
@@ -62,5 +62,46 @@ describe("milestoneTaxable", () => {
     expect(milestoneTaxable({ basis: "percent", percent: "30", amount: null }, "10000.00")).toBe(300000n);
     expect(milestoneTaxable({ basis: "percent", percent: "33.33", amount: null }, "100.00")).toBe(3333n);
     expect(milestoneTaxable({ basis: "amount", percent: null, amount: "2500.50" }, "10000.00")).toBe(250050n);
+  });
+});
+
+describe("buildBillingStatement", () => {
+  const plan = [
+    { id: "a", position: 1, title: "Kickoff", basis: "percent" as const, percent: "15.00", taxable: "97500.00" },
+    { id: "b", position: 2, title: "Design", basis: "percent" as const, percent: "20.00", taxable: "130000.00" },
+    { id: "c", position: 3, title: "Go-live", basis: "amount" as const, percent: null, taxable: "422500.00" },
+  ];
+  const base = { contractValue: "650000.00", milestones: plan };
+
+  it("marks the billed milestone and works out what is left to bill", () => {
+    const s = buildBillingStatement({ ...base, billedBefore: "0.00", thisInvoice: "97500.00", currentMilestoneId: "a" });
+    expect(s.schedule.map((e) => e.current)).toEqual([true, false, false]);
+    expect(s.billedToDate).toBe("97500.00");
+    expect(s.balanceToBill).toBe("552500.00");
+  });
+
+  it("counts earlier issued invoices, not just this one", () => {
+    const s = buildBillingStatement({ ...base, billedBefore: "97500.00", thisInvoice: "130000.00", currentMilestoneId: "b" });
+    expect(s.billedBefore).toBe("97500.00");
+    expect(s.billedToDate).toBe("227500.00");
+    expect(s.balanceToBill).toBe("422500.00");
+  });
+
+  it("never reports a negative balance", () => {
+    const s = buildBillingStatement({ ...base, billedBefore: "600000.00", thisInvoice: "100000.00", currentMilestoneId: null });
+    expect(s.balanceToBill).toBe("0.00");
+  });
+
+  it("derives the share of an amount-based milestone and totals the plan", () => {
+    const s = buildBillingStatement({ ...base, billedBefore: "0.00", thisInvoice: "0.00", currentMilestoneId: null });
+    expect(s.schedule.map((e) => e.share)).toEqual(["15.00", "20.00", "65.00"]);
+    expect(s.scheduleTotal).toBe("650000.00");
+    expect(s.scheduleShare).toBe("100.00");
+  });
+
+  it("handles a zero contract value without dividing by zero", () => {
+    const s = buildBillingStatement({ contractValue: "0.00", billedBefore: "0.00", thisInvoice: "0.00", milestones: [], currentMilestoneId: null });
+    expect(s.scheduleShare).toBe("0.00");
+    expect(s.balanceToBill).toBe("0.00");
   });
 });

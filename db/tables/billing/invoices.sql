@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   notes                    TEXT,
   client_snapshot          JSONB,        -- client name/address/GSTIN as they were at issue
   company_snapshot         JSONB,        -- our own details and bank details as they were at issue
+  document_snapshot        JSONB,        -- project refs, billed milestone and billing schedule as they were at issue
   issued_at                TIMESTAMPTZ,
   issued_by                UUID          REFERENCES users(id) ON DELETE SET NULL,
   cancelled_at             TIMESTAMPTZ,

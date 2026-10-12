@@ -5,10 +5,11 @@ import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { AppError } from "@/lib/auth/errors";
 import { addDays, format, parseISO } from "date-fns";
-import { financialYear, computeInvoiceLine, summarizeInvoice, supplyType, type InvoiceLineAmounts } from "@/lib/gst";
+import { computeInvoiceLine, summarizeInvoice, supplyType, type InvoiceLineAmounts } from "@/lib/gst";
 import { todayIST } from "@/lib/dates";
-import { nextSequence } from "@/lib/sequences";
-import { planShares, type BillMode } from "@/lib/billing";
+import { ensureClientCode, nextSequence } from "@/lib/sequences";
+import { invoiceNumber, monthScope } from "@/lib/numbering";
+import { buildBillingStatement, planShares, type BillMode, type DocumentSnapshot } from "@/lib/billing";
 import { formatScaled, parseScaled } from "@/lib/money";
 import { likePattern } from "@/lib/validation";
 import { stateNameByCode } from "@/lib/india";
@@ -36,6 +37,7 @@ export interface InvoiceRow {
   notes: string | null;
   client_snapshot: ClientSnapshot | null;
   company_snapshot: CompanySnapshot | null;
+  document_snapshot: DocumentSnapshot | null;
   issued_at: string | null;
   cancelled_at: string | null;
   cancel_reason: string | null;
@@ -51,16 +53,16 @@ export interface InvoiceItemRow {
   discount_percent: string; tax_rate: string; taxable_amount: string; cgst_amount: string; sgst_amount: string; igst_amount: string; tax_amount: string; line_total: string;
 }
 export interface ClientSnapshot { name: string; legalName: string; gstin: string | null; pan: string | null; billingAddress: string | null; shippingAddress: string | null; city: string | null; state: string | null; stateCode: string | null; postalCode: string | null; country: string; email: string | null; phone: string | null }
-export type CompanySnapshot = Pick<CompanySettings, "legal_name" | "trade_name" | "address" | "city" | "state_code" | "postal_code" | "gstin" | "pan" | "email" | "phone" | "website" | "bank_account_name" | "bank_name" | "bank_account_number" | "bank_ifsc" | "bank_branch" | "upi_id" | "signatory_name"> & { state: string | null };
+export type CompanySnapshot = Pick<CompanySettings, "legal_name" | "trade_name" | "address" | "city" | "state_code" | "postal_code" | "gstin" | "pan" | "email" | "phone" | "website" | "bank_account_name" | "bank_name" | "bank_account_number" | "bank_ifsc" | "bank_branch" | "upi_id" | "signatory_name" | "invoice_tagline" | "invoice_declaration"> & { state: string | null };
 
 const TODAY = "(now() AT TIME ZONE 'Asia/Kolkata')::date";
 const PAID = `COALESCE((SELECT sum(a.amount) FROM payment_allocations a WHERE a.invoice_id = i.id AND a.reversed_at IS NULL), 0)`;
 
 const SELECT = `
-  SELECT i.id, i.invoice_number, i.status, i.client_id, c.display_name AS client_name, i.sale_id, s.sale_number,
+  SELECT i.id, i.invoice_number, i.status, i.client_id, COALESCE(i.client_snapshot->>'name', c.display_name) AS client_name, i.sale_id, s.sale_number,
          to_char(i.issue_date,'YYYY-MM-DD') AS issue_date, to_char(i.due_date,'YYYY-MM-DD') AS due_date, i.currency,
          i.place_of_supply_state_code, i.supply_type, i.subtotal, i.cgst_total, i.sgst_total, i.igst_total, i.tax_total, i.round_off, i.total,
-         i.payment_terms, i.notes, i.client_snapshot, i.company_snapshot, i.issued_at, i.cancelled_at, i.cancel_reason, i.created_at, i.updated_at,
+         i.payment_terms, i.notes, i.client_snapshot, i.company_snapshot, i.document_snapshot, i.issued_at, i.cancelled_at, i.cancel_reason, i.created_at, i.updated_at,
          ${PAID} AS amount_paid,
          CASE WHEN i.status = 'issued' THEN i.total - ${PAID} ELSE 0 END AS balance_due,
          CASE WHEN ${PAID} >= i.total THEN 'paid' WHEN ${PAID} > 0 THEN 'partial' ELSE 'unpaid' END AS payment_status,
@@ -143,8 +145,62 @@ function price(items: InvoiceInput["items"], supply: "intra" | "inter", roundOff
   return { lines, totals: summarizeInvoice(lines, roundOff) };
 }
 
+type ClientRow = { id: string; legal_name: string; display_name: string; gstin: string | null; pan: string | null; billing_address: string | null; shipping_address: string | null; city: string | null; state_code: string | null; postal_code: string | null; country: string; email: string | null; phone: string | null; archived_at: string | null };
+
+const snapshotClient = (client: ClientRow): ClientSnapshot => ({
+  name: client.display_name, legalName: client.legal_name, gstin: client.gstin, pan: client.pan, billingAddress: client.billing_address, shippingAddress: client.shipping_address,
+  city: client.city, state: stateNameByCode(client.state_code), stateCode: client.state_code, postalCode: client.postal_code, country: client.country, email: client.email, phone: client.phone,
+});
+
+const snapshotCompany = (settings: CompanySettings): CompanySnapshot => ({
+  legal_name: settings.legal_name, trade_name: settings.trade_name, address: settings.address, city: settings.city, state_code: settings.state_code, state: stateNameByCode(settings.state_code),
+  postal_code: settings.postal_code, gstin: settings.gstin, pan: settings.pan, email: settings.email, phone: settings.phone, website: settings.website,
+  bank_account_name: settings.bank_account_name, bank_name: settings.bank_name, bank_account_number: settings.bank_account_number, bank_ifsc: settings.bank_ifsc,
+  bank_branch: settings.bank_branch, upi_id: settings.upi_id, signatory_name: settings.signatory_name,
+  invoice_tagline: settings.invoice_tagline, invoice_declaration: settings.invoice_declaration,
+});
+
+/**
+ * The project references, the milestone this invoice bills and the billing schedule, as they stand now.
+ * Called when the invoice is issued (and stored), and for the live preview of a draft.
+ */
+async function buildDocumentSnapshot(invoiceId: string, saleId: string, invoiceSubtotal: string, runner?: PoolClient): Promise<DocumentSnapshot> {
+  const sale = await getSaleRow(saleId, runner);
+  const milestones = await getMilestones(saleId, sale.subtotal, runner);
+  const before = await db.queryOne<{ billed: string }>(
+    "SELECT COALESCE(sum(subtotal), 0) AS billed FROM invoices WHERE sale_id = $1 AND status = 'issued' AND id <> $2", [saleId, invoiceId], runner,
+  );
+  const mine = milestones.find((m) => m.invoice_id === invoiceId) ?? null;
+  const statement = buildBillingStatement({
+    contractValue: sale.subtotal, billedBefore: before!.billed, thisInvoice: invoiceSubtotal,
+    milestones: milestones.map((m) => ({ id: m.id, position: m.position, title: m.title, basis: m.basis, percent: m.percent, taxable: m.taxable })),
+    currentMilestoneId: mine?.id ?? null,
+  });
+  const entry = mine ? statement.schedule.find((s) => s.current) : null;
+  return {
+    version: 1,
+    sale: { number: sale.sale_number, title: sale.title, quotationNumber: sale.quotation_number, agreementRef: sale.agreement_ref },
+    milestone: mine && entry ? { position: mine.position, title: mine.title, description: mine.description, share: entry.share } : null,
+    statement,
+  };
+}
+
+/** What the PDF needs besides the invoice itself. Issued/cancelled invoices use their frozen copies; drafts are built from live data. */
+export async function getInvoiceRenderContext(invoice: InvoiceRow): Promise<{ company: CompanySnapshot; client: ClientSnapshot; document: DocumentSnapshot | null }> {
+  if (invoice.company_snapshot && invoice.client_snapshot) {
+    return { company: invoice.company_snapshot, client: invoice.client_snapshot, document: invoice.document_snapshot };
+  }
+  const client = await db.queryOne<ClientRow>("SELECT * FROM clients WHERE id = $1", [invoice.client_id]);
+  if (!client) throw new AppError("Client not found", 404, "NOT_FOUND");
+  return {
+    company: snapshotCompany(await getSettings()),
+    client: snapshotClient(client),
+    document: await buildDocumentSnapshot(invoice.id, invoice.sale_id, invoice.subtotal),
+  };
+}
+
 async function loadClient(tx: PoolClient, clientId: string) {
-  const r = await tx.query<{ id: string; legal_name: string; display_name: string; gstin: string | null; pan: string | null; billing_address: string | null; shipping_address: string | null; city: string | null; state_code: string | null; postal_code: string | null; country: string; email: string | null; phone: string | null; archived_at: string | null }>(
+  const r = await tx.query<ClientRow>(
     "SELECT * FROM clients WHERE id = $1",
     [clientId],
   );
@@ -315,21 +371,20 @@ export async function issueInvoice(id: string, actorId: string) {
 
     await writeItems(tx, id, items, lines);
 
-    const number = `${settings.invoice_prefix}/${financialYear(inv.issue_date)}/${String(await nextSequence("invoice", financialYear(inv.issue_date), tx)).padStart(4, "0")}`;
-    const clientSnapshot: ClientSnapshot = {
-      name: client.display_name, legalName: client.legal_name, gstin: client.gstin, pan: client.pan, billingAddress: client.billing_address, shippingAddress: client.shipping_address,
-      city: client.city, state: stateNameByCode(client.state_code), stateCode: client.state_code, postalCode: client.postal_code, country: client.country, email: client.email, phone: client.phone,
-    };
-    const companySnapshot: CompanySnapshot = {
-      legal_name: settings.legal_name, trade_name: settings.trade_name, address: settings.address, city: settings.city, state_code: settings.state_code, state: stateNameByCode(settings.state_code),
-      postal_code: settings.postal_code, gstin: settings.gstin, pan: settings.pan, email: settings.email, phone: settings.phone, website: settings.website,
-      bank_account_name: settings.bank_account_name, bank_name: settings.bank_name, bank_account_number: settings.bank_account_number, bank_ifsc: settings.bank_ifsc,
-      bank_branch: settings.bank_branch, upi_id: settings.upi_id, signatory_name: settings.signatory_name,
-    };
+    const code = await ensureClientCode(inv.client_id, tx);
+    let number: string;
+    try {
+      number = invoiceNumber(inv.issue_date, code, await nextSequence("invoice", monthScope(inv.issue_date, code), tx));
+    } catch (e) {
+      throw new AppError((e as Error).message, 422, "INVOICE_NUMBER_INVALID");
+    }
+    const clientSnapshot = snapshotClient(client);
+    const companySnapshot = snapshotCompany(settings);
+    const documentSnapshot = await buildDocumentSnapshot(id, sale.id, totals.subtotal, tx);
     await tx.query(
       `UPDATE invoices SET status='issued', invoice_number=$1, place_of_supply_state_code=$2, supply_type=$3, subtotal=$4, cgst_total=$5, sgst_total=$6, igst_total=$7,
-         tax_total=$8, round_off=$9, total=$10, client_snapshot=$11, company_snapshot=$12, issued_at=now(), issued_by=$13, updated_at=now() WHERE id=$14`,
-      [number, pos, supply, totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.tax, totals.roundOff, totals.total, JSON.stringify(clientSnapshot), JSON.stringify(companySnapshot), actorId, id],
+         tax_total=$8, round_off=$9, total=$10, client_snapshot=$11, company_snapshot=$12, document_snapshot=$13, issued_at=now(), issued_by=$14, updated_at=now() WHERE id=$15`,
+      [number, pos, supply, totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.tax, totals.roundOff, totals.total, JSON.stringify(clientSnapshot), JSON.stringify(companySnapshot), JSON.stringify(documentSnapshot), actorId, id],
     );
     await logActivity({ entityType: "invoice", entityId: id, clientId: inv.client_id, action: "issued", summary: `Invoice ${number} issued against ${sale.sale_number} (total ${totals.total})`, actorId, metadata: { number, total: totals.total, saleId: sale.id } }, tx);
     return number;

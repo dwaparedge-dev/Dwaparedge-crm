@@ -53,17 +53,19 @@ describe("GST on invoices", () => {
 });
 
 describe("issuing and numbering", () => {
-  it("numbers invoices by financial year and prefix", async () => {
+  it("numbers invoices as INV-MMYY-clientcode-NN, restarting each month", async () => {
     const a = await issuedInvoice(actor, intra, "100", "18", "2026-10-05", "2026-10-20");
     const b = await issuedInvoice(actor, intra, "100", "18", "2027-04-02", "2027-04-20");
-    expect(a.number).toMatch(/^DE\/2026-27\/\d{4}$/);
-    expect(b.number).toMatch(/^DE\/2027-28\/0001$/); // a new financial year restarts at 1
+    expect(a.number).toMatch(/^INV-1026-[A-Z]{2}\d{2}-\d{2}$/);
+    expect(b.number).toMatch(/^INV-0427-[A-Z]{2}\d{2}-01$/); // a new month restarts at 01
+    expect(b.number.split("-")[2]).toBe(a.number.split("-")[2]); // same client, same code
+    expect(a.number.length).toBeLessThanOrEqual(16);
   });
   it("gives concurrent issuers distinct, gap-free numbers", async () => {
     const { issueInvoice } = await import("@/features/invoices/service");
     const ids = await Promise.all(Array.from({ length: 8 }, () => draft(intra, { issueDate: "2026-11-05", dueDate: "2026-11-20" })));
     const numbers = await Promise.all(ids.map((id) => issueInvoice(id, actor)));
-    const seq = numbers.map((n) => Number(n.split("/")[2])).sort((x, y) => x - y);
+    const seq = numbers.map((n) => Number(n.split("-")[3])).sort((x, y) => x - y);
     expect(new Set(numbers).size).toBe(8);
     expect(seq[7]! - seq[0]!).toBe(7); // consecutive
   });
@@ -74,7 +76,7 @@ describe("issuing and numbering", () => {
     const bad = await draft(noAddr, { issueDate: "2026-12-06", dueDate: "2026-12-20" });
     await expectAppError(issueInvoice(bad, actor), 422, "CLIENT_INCOMPLETE");
     const after = await issuedInvoice(actor, intra, "10", "18", "2026-12-07", "2026-12-20");
-    expect(Number(after.number.split("/")[2])).toBe(Number(before.number.split("/")[2]) + 1);
+    expect(Number(after.number.split("-")[3])).toBe(Number(before.number.split("-")[3]) + 1);
   });
   it("freezes the client and company details at issue", async () => {
     const { getInvoice } = await import("@/features/invoices/service");

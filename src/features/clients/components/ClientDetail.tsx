@@ -96,6 +96,7 @@ export function ClientDetail({ id }: { id: string }) {
             avatarIcon={<BusinessIcon sx={{ fontSize: 32 }} />}
             badges={<MasterStatusBadge status={archived ? "inactive" : "active"} customLabel={archived ? "Archived" : "Active"} />}
             attributes={[
+              { label: "Client code", value: c.code ?? "—", isMonospace: true },
               { label: "Legal name", value: c.legal_name },
               { label: "PAN", value: c.pan ?? "—", isMonospace: true },
               { label: "Email", value: c.email ?? "—" },
@@ -131,8 +132,9 @@ export function ClientDetail({ id }: { id: string }) {
               <>
                 <SectionLabel>Business details</SectionLabel>
                 <Grid container spacing={2}>
-                  <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Legal name">{c.legal_name}</InfoBox></Grid>
-                  <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Account owner">{c.owner_name}</InfoBox></Grid>
+                  <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Client code">{c.code}</InfoBox></Grid>
+                  <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Legal name">{c.legal_name}</InfoBox></Grid>
+                  <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Account owner">{c.owner_name}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="GSTIN">{c.gstin}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="PAN">{c.pan}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="State">{state}</InfoBox></Grid>

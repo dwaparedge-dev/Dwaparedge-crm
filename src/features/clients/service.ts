@@ -4,10 +4,12 @@ import { db } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { AppError } from "@/lib/auth/errors";
 import { likePattern } from "@/lib/validation";
+import { ensureClientCode } from "@/lib/sequences";
 import { SORT_COLUMNS, type ClientInput, type ListClientsParams } from "./schema";
 
 export interface ClientRow {
   id: string;
+  code: string | null;
   legal_name: string;
   display_name: string;
   gstin: string | null;
@@ -43,7 +45,7 @@ export async function listClients(p: ListClientsParams) {
   if (p.ownerId) where.push(`c.owner_id = ${add(p.ownerId)}`);
   if (p.search) {
     const s = add(likePattern(p.search));
-    where.push(`(c.legal_name ILIKE ${s} OR c.display_name ILIKE ${s} OR c.gstin ILIKE ${s} OR c.email ILIKE ${s} OR c.phone ILIKE ${s} OR c.city ILIKE ${s})`);
+    where.push(`(c.code ILIKE ${s} OR c.legal_name ILIKE ${s} OR c.display_name ILIKE ${s} OR c.gstin ILIKE ${s} OR c.pan ILIKE ${s} OR c.email ILIKE ${s} OR c.phone ILIKE ${s} OR c.city ILIKE ${s})`);
   }
   const order = `${SORT_COLUMNS[p.sort]} ${p.dir === "desc" ? "DESC" : "ASC"}, c.id`;
   const limit = add(p.pageSize);
@@ -143,7 +145,8 @@ export async function createClient(input: ClientInput, actorId: string, confirmD
       [...toParams(input), actorId],
     );
     const id = rows[0]!.id;
-    await logActivity({ entityType: "client", entityId: id, clientId: id, action: "created", summary: `Client "${input.displayName}" created`, actorId }, tx);
+    const code = await ensureClientCode(id, tx);
+    await logActivity({ entityType: "client", entityId: id, clientId: id, action: "created", summary: `Client "${input.displayName}" (${code}) created`, actorId }, tx);
     return id;
   });
 }

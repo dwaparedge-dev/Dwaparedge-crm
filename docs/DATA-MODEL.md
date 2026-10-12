@@ -1,6 +1,6 @@
 # Data model
 
-PostgreSQL, declared in `db/tables/**/*.sql` (registered in `db/schema.ts`, built by `npm run db:sync`; triggers and views in `db/logic/`). UUID primary keys, `timestamptz` timestamps, money as `NUMERIC(14,2)`, quantities `NUMERIC(12,3)`, rates `NUMERIC(5,2)`. Business data is relational; the only JSON columns are the frozen party snapshots on issued invoices and free-form `metadata` on the activity log.
+PostgreSQL, declared in `db/tables/**/*.sql` (registered in `db/schema.ts`, built by `npm run db:sync`; triggers and views in `db/logic/`). UUID primary keys, `timestamptz` timestamps, money as `NUMERIC(14,2)`, quantities `NUMERIC(12,3)`, rates `NUMERIC(5,2)`. Business data is relational; the only JSON columns are the frozen snapshots on issued invoices (parties and document) and free-form `metadata` on the activity log.
 
 ```
 users ──< clients ──< contacts
@@ -18,19 +18,19 @@ field_options (dropdown lists: table, column, key → label)
 |---|---|
 | `users` | Staff login. `password_hash` (bcrypt), `token_version` (bump = revoke sessions), `is_active`. Unique on `lower(email)` |
 | `login_attempts` | Failed-login counters (hashed email/IP) for lock-out |
-| `clients` | Legal/display name, GSTIN (unique, format-checked), PAN, address, state code (the name follows from it), owner, `archived_at` (= inactive). Never deleted |
+| `clients` | Permanent `code` (AA01 ... AA99, AB01 ... ZZ99, unique), legal/display name, GSTIN (unique, format-checked), PAN, address, state code (the name follows from it), owner, `archived_at` (= inactive). Never deleted |
 | `contacts` | Per client; partial unique index = at most one primary |
 | `products` | Catalog: type, SKU (unique, case-insensitive), HSN/SAC, price, GST rate (0 = exempt), active |
-| `sales`, `sale_items` | What was sold. Items copy description/price/tax from the product at the time |
+| `sales`, `sale_items` | What was sold. Items copy description/price/tax from the product at the time. `quotation_number` and `agreement_ref` are printed in the invoice's Project & Agreement block |
 | `licenses` | Register (`status`: pending/active/suspended/revoked; *expired* is derived from `expiry_date`). Its history is the `activity_log` filtered to the license (status change and note in `metadata`) |
 | `field_options` | User-extendable dropdowns: `(table_name, column_name, option_key, option_value)`. The business table stores the **key**; the label is looked up, so renaming never touches records. Built-in rows (`is_system`) can be hidden, not deleted. A trigger rejects unknown keys on `sales.type`, `products.type`, `payments.method`, `licenses.plan`. Which columns may have options is a whitelist in `src/features/options/registry.ts` |
-| `sale_milestones` | Optional billing plan of a sale: instalments by percentage or fixed amount (before GST), with a due date. `invoice_id` links the instalment to its invoice; it counts as billed only while that invoice is a draft or issued |
-| `invoices`, `invoice_items` | **Every invoice has a `sale_id` and every line a `sale_item_id`** (NOT NULL). A trigger blocks billing more of a sale item than it is worth; another stops a billed sale item from being removed or reduced. Draft → issued → cancelled. Number allocated at issue. Snapshots, per-line CGST/SGST/IGST, round-off. **Triggers** make issued rows immutable and undeletable |
+| `sale_milestones` | Optional billing plan of a sale: instalments by percentage or fixed amount (before GST), with a due date and a `description` (deliverables, printed on that instalment's invoice). `invoice_id` links the instalment to its invoice; it counts as billed only while that invoice is a draft or issued |
+| `invoices`, `invoice_items` | **Every invoice has a `sale_id` and every line a `sale_item_id`** (NOT NULL). A trigger blocks billing more of a sale item than it is worth; another stops a billed sale item from being removed or reduced. Draft → issued → cancelled. Number allocated at issue. Snapshots (`client_snapshot`, `company_snapshot`, and `document_snapshot`: project references, the milestone billed, the full billing schedule and the billed-to-date / balance figures), per-line CGST/SGST/IGST, round-off. **Triggers** make issued rows immutable and undeletable |
 | `payments` | Receipt number, amount, method, reference, optional `sale_id` (what it was paid for). Immutable; corrected by voiding |
 | `payment_allocations` | Payment ↔ invoice amounts. Reversed rows are kept (`reversed_at`). **Trigger** locks both rows and blocks over-allocation and cross-client allocation |
 | `activity_log` | Who/what/when for every change, with `client_id` for the client history tab |
-| `company_settings` | One row (`id = 1`): company, state, GSTIN, bank, prefixes, defaults |
-| `document_sequences` | `(doc_type, scope)` counters: invoices and receipts per financial year, sales global. Allocated with a row-locking upsert inside the business transaction |
+| `company_settings` | One row (`id = 1`): company, state, GSTIN, bank, receipt prefix, defaults, invoice tagline and declaration text |
+| `document_sequences` | `(doc_type, scope)` counters: client codes (global), sale orders (per client), quotations and invoices (per client per month, scope `AA01-1026`), receipts (per financial year). Allocated with a row-locking upsert inside the business transaction |
 | `sale_item_billing`, `sale_billing` (views) | Derived per-item and per-sale figures: taxable billed (issued vs draft), billed total, paid on invoices, advance, still to bill. Never stored, so they cannot drift |
 | `_migrations` | Applied migration files |
 
@@ -41,3 +41,14 @@ field_options (dropdown lists: table, column, key → label)
 ## Why not Prisma's suggested model list
 
 The brief listed Lead, FollowUp, Quotation, CreditNote, Deal and similar tables. v1 scope was reduced to clients, sales, licenses, invoices and payments, so: *Deal/DealItem* became `sales`/`sale_items`; *Lead, FollowUp, Quotation, CreditNote* are deferred (nothing in the schema blocks adding them); *DocumentSequence*, *LicenseEvent*, *PaymentAllocation*, *ActivityLog* and *CompanySettings* are implemented as specified; *UserProfile* is the `users` table itself because auth is local rather than Supabase Auth.
+
+## Document numbers
+
+| Document | Format | Counter |
+|---|---|---|
+| Client code | `AA01`, `AA02` ... `AA99`, `AB01` ... `ZZ99` | One global counter; permanent for the client, assigned when the client is created |
+| Sale order | `SL-AA01-01` | Per client, never restarts |
+| Quotation | `QT-1026-AA01-01` (QT-MMYY-client-nth) | Per client per month of the sale date; created with the sale |
+| Invoice | `INV-1026-AA01-01` (INV-MMYY-client-nth) | Per client per month of the issue date; allocated at issue |
+
+Invoice numbers must stay within GST's 16 characters (CGST Rule 46), so the prefix is fixed (`INV`) and a client can have at most 99 invoices a month; issuing the 100th is refused with a clear message. Sales, quotations and invoices created before codes existed keep their old numbers (`SL-0007`, `DE/2026-27/0001`); only new documents use the new format.

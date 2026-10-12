@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -29,12 +29,13 @@ interface Row {
   basis: "percent" | "amount";
   value: string;
   dueDate: string;
+  description: string;
   locked: boolean;
   invoice?: Pick<MilestoneRow, "invoice_id" | "invoice_number" | "invoice_status" | "invoice_total" | "invoice_paid">;
 }
 
 const fromMilestone = (m: MilestoneRow): Row => ({
-  id: m.id, title: m.title, basis: m.basis, value: m.basis === "percent" ? String(Number(m.percent)) : m.amount!, dueDate: m.due_date ?? "",
+  id: m.id, title: m.title, basis: m.basis, value: m.basis === "percent" ? String(Number(m.percent)) : m.amount!, dueDate: m.due_date ?? "", description: m.description ?? "",
   locked: Boolean(m.invoice_id), invoice: m,
 });
 
@@ -65,7 +66,7 @@ export function PlanTab({ saleId, subtotal, milestones, editable, onChanged, onB
     try {
       await api(`/api/sales/${saleId}/milestones`, {
         method: "PUT",
-        body: { milestones: rows.map((r) => ({ id: r.id, title: r.title, basis: r.basis, percent: r.basis === "percent" ? r.value : "", amount: r.basis === "amount" ? r.value : "", dueDate: r.dueDate })) },
+        body: { milestones: rows.map((r) => ({ id: r.id, title: r.title, basis: r.basis, percent: r.basis === "percent" ? r.value : "", amount: r.basis === "amount" ? r.value : "", dueDate: r.dueDate, description: r.description })) },
       });
       notify.success("Billing plan saved");
       onChanged();
@@ -88,7 +89,8 @@ export function PlanTab({ saleId, subtotal, milestones, editable, onChanged, onB
             <TableHead><TableRow><TableCell>Instalment</TableCell><TableCell>Basis</TableCell><TableCell>Value</TableCell><TableCell>Due date</TableCell><TableCell>Invoice</TableCell><TableCell align="right">Action</TableCell></TableRow></TableHead>
             <TableBody>
               {rows.map((r, i) => (
-                <TableRow key={r.id ?? `new-${i}`}>
+                <Fragment key={r.id ?? `new-${i}`}>
+                <TableRow sx={{ "& td": { borderBottom: 0 } }}>
                   <TableCell><TextField size="small" value={r.title} disabled={r.locked || !editable} onChange={(e) => set(i, { title: e.target.value })} placeholder="e.g. Advance" slotProps={{ htmlInput: { "aria-label": "Instalment name" } }} /></TableCell>
                   <TableCell><TextField select size="small" value={r.basis} disabled={r.locked || !editable} onChange={(e) => set(i, { basis: e.target.value as Row["basis"] })} sx={{ minWidth: 130 }}><MenuItem value="percent">Percentage</MenuItem><MenuItem value="amount">Amount (before GST)</MenuItem></TextField></TableCell>
                   <TableCell><TextField size="small" value={r.value} disabled={r.locked || !editable} onChange={(e) => set(i, { value: e.target.value })} inputMode="decimal" sx={{ width: 120 }} slotProps={{ htmlInput: { "aria-label": "Instalment value" } }} /></TableCell>
@@ -108,6 +110,13 @@ export function PlanTab({ saleId, subtotal, milestones, editable, onChanged, onB
                     {!r.locked && editable && <IconButton aria-label="Remove instalment" onClick={() => setRows((rs) => rs.filter((_, idx) => idx !== i))}><DeleteIcon fontSize="small" /></IconButton>}
                   </TableCell>
                 </TableRow>
+                <TableRow>
+                  <TableCell colSpan={6} sx={{ pt: 0 }}>
+                    <TextField size="small" fullWidth multiline minRows={1} value={r.description} disabled={!editable} onChange={(e) => set(i, { description: e.target.value })}
+                      placeholder="Deliverables for this instalment (printed on its invoice)" slotProps={{ htmlInput: { "aria-label": "Instalment deliverables", maxLength: 1500 } }} />
+                  </TableCell>
+                </TableRow>
+                </Fragment>
               ))}
             </TableBody>
           </Table>
@@ -119,7 +128,7 @@ export function PlanTab({ saleId, subtotal, milestones, editable, onChanged, onB
         </Typography>
         {editable && (
           <Box sx={{ display: "flex", gap: 1 }}>
-            <Button startIcon={<AddIcon />} onClick={() => setRows((rs) => [...rs, { title: "", basis: "percent", value: "", dueDate: "", locked: false }])}>Add instalment</Button>
+            <Button startIcon={<AddIcon />} onClick={() => setRows((rs) => [...rs, { title: "", basis: "percent", value: "", dueDate: "", description: "", locked: false }])}>Add instalment</Button>
             <Button variant="contained" onClick={save} disabled={busy || !dirty || over}>{busy ? "Saving…" : "Save plan"}</Button>
           </Box>
         )}
