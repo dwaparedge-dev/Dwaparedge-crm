@@ -125,7 +125,7 @@ A sync never drops or rewrites anything, so removing or renaming a column, chang
 
 1. Push the repo and import it in Vercel (framework: Next.js; Node 20+).
 2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it). Use a **different** `JWT_SECRET` from local.
-3. Sync the schema and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:sync && npm run db:seed-admin`) or in CI before the first deploy. The build does not migrate automatically, on purpose.
+3. Sync the schema and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:sync && npm run db:seed-admin`) before the first deploy. The build does not migrate automatically, on purpose.
 4. Pick the Vercel function region closest to your Supabase region (e.g. Supabase `ap-southeast-2` → Vercel `syd1`) to keep database round trips short.
 5. Each serverless instance keeps a small pool (3 connections on Vercel). If you scale up, watch the Supabase pooler's connection limit.
 
