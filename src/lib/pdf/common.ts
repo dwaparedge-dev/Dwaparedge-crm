@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import PDFDocument from "pdfkit";
 
@@ -11,6 +12,19 @@ export const PAGE = { left: 36, width: 523, bottom: 785 } as const;
 /** Embedded Noto Sans: the standard PDF fonts have no rupee sign. Registered lazily, so documents that don't use them never read the files. */
 export const FONT = { regular: "Body", bold: "Body-Bold" } as const;
 const FONT_DIR = join(process.cwd(), "src", "assets", "fonts");
+
+/** The authorised signatory's signature (transparent PNG), or null when the file is not there. Read once. */
+let signature: Buffer | null | undefined;
+export function signatureImage(): Buffer | null {
+  if (signature === undefined) {
+    try {
+      signature = readFileSync(join(process.cwd(), "src", "assets", "signature.png"));
+    } catch {
+      signature = null;
+    }
+  }
+  return signature;
+}
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 

@@ -7,6 +7,7 @@ export const OPTION_FIELDS = {
   "products.type": { title: "Product types", noun: "product type" },
   "payments.method": { title: "Payment methods", noun: "payment method" },
   "licenses.plan": { title: "License plans", noun: "license plan" },
+  "client_documents.doc_type": { title: "Client document types", noun: "document type" },
 } as const;
 
 export type OptionFieldKey = keyof typeof OPTION_FIELDS;

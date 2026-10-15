@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   client_id                UUID          NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
   sale_id                  UUID          NOT NULL REFERENCES sales(id) ON DELETE RESTRICT,
   issue_date               DATE          NOT NULL,
-  due_date                 DATE          NOT NULL,
+  due_date                 DATE,          -- NULL = no due date specified (changeable when the invoice is regenerated)
   currency                 TEXT          NOT NULL DEFAULT 'INR',
   place_of_supply_state_code TEXT,
   supply_type              TEXT          CHECK (supply_type IN ('intra','inter')),

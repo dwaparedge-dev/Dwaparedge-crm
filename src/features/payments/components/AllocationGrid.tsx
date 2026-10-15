@@ -91,7 +91,7 @@ export function AllocationGrid({ clientId, available, values, onChange, focusInv
           {data.items.map((inv) => (
             <TableRow key={inv.id} selected={inv.id === focusInvoiceId}>
               <TableCell>{inv.invoice_number}</TableCell>
-              <TableCell>{format(parseISO(inv.due_date), "dd MMM yyyy")}{inv.is_overdue && <Typography component="span" color="error" variant="caption"> overdue</Typography>}</TableCell>
+              <TableCell>{inv.due_date ? format(parseISO(inv.due_date), "dd MMM yyyy") : "Not specified"}{inv.is_overdue && <Typography component="span" color="error" variant="caption"> overdue</Typography>}</TableCell>
               <TableCell align="right">{formatMoney(inv.balance_due)}</TableCell>
               <TableCell align="right">
                 <TextField size="small" inputMode="decimal" value={values[inv.id] ?? ""} placeholder="0.00"

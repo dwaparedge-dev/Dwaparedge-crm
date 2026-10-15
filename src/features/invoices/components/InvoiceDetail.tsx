@@ -18,11 +18,13 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useNotify } from "@/components/common/Notify";
 import { ReasonDialog } from "@/components/common/ReasonDialog";
 import { DetailTabPanel, DetailViewHeroSidebar, DetailViewLayout, DetailViewMetricStrip, DetailViewTabs, MasterStatusBadge } from "@/components/shared/DetailView";
+import HistoryIcon from "@mui/icons-material/HistoryOutlined";
 import ListAltIcon from "@mui/icons-material/ListAltOutlined";
 import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import ReceiptIcon from "@mui/icons-material/ReceiptLongOutlined";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
+import RefreshIcon from "@mui/icons-material/AutorenewOutlined";
 import EditIcon from "@mui/icons-material/EditOutlined";
 import { ErrorState } from "@/components/common/states";
 import { HeroActions } from "@/components/common/HeroActions";
@@ -32,11 +34,12 @@ import { formatMoney } from "@/lib/format";
 import { stateNameByCode } from "@/lib/india";
 import { OptionLabel } from "@/features/options/components/OptionSelect";
 import { RecordPaymentDialog } from "@/features/payments/components/RecordPaymentDialog";
-import type { InvoiceItemRow, InvoiceRow } from "../service";
+import type { InvoiceItemRow, InvoiceRow, InvoiceVersionRow } from "../service";
 import { InvoiceFormDialog } from "./InvoiceFormDialog";
+import { RegenerateInvoiceDialog } from "./RegenerateInvoiceDialog";
 
 type Allocation = { id: string; payment_id: string; receipt_number: string; payment_date: string; method: string; amount: string; reversed_at: string | null };
-type Detail = InvoiceRow & { items: InvoiceItemRow[]; allocations: Allocation[] };
+type Detail = InvoiceRow & { items: InvoiceItemRow[]; allocations: Allocation[]; version: number; versions: InvoiceVersionRow[] };
 
 const Row = ({ label, value, strong }: { label: string; value: string; strong?: boolean }) => (
   <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}>
@@ -50,7 +53,7 @@ export function InvoiceDetail({ id }: { id: string }) {
   const notify = useNotify();
   const { data: inv, error, loading, reload } = useFetch<Detail>(`/api/invoices/${id}`);
   const sale = useFetch<{ advance: string; sale_number: string }>(inv ? `/api/sales/${inv.sale_id}` : null);
-  const [dialog, setDialog] = useState<"issue" | "cancel" | "delete" | "pay" | null>(null);
+  const [dialog, setDialog] = useState<"issue" | "cancel" | "delete" | "pay" | "regen" | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState(0);
@@ -115,6 +118,7 @@ export function InvoiceDetail({ id }: { id: string }) {
   const tabs = [
     { key: "lines", label: "Invoice lines", icon: <ListAltIcon sx={{ fontSize: 18 }} /> },
     ...(!isDraft ? [{ key: "payments", label: "Payments applied", icon: <PaymentsIcon sx={{ fontSize: 18 }} />, count: live.length || undefined }] : []),
+    ...(!isDraft ? [{ key: "versions", label: "Versions", icon: <HistoryIcon sx={{ fontSize: 18 }} />, count: inv.versions.length }] : []),
   ];
   return (
     <>
@@ -137,8 +141,9 @@ export function InvoiceDetail({ id }: { id: string }) {
               ...(snap?.gstin ? [{ label: "Client GSTIN", value: snap.gstin, isMonospace: true }] : []),
               { label: "Sale", value: <Link href={`/sales/${inv.sale_id}`}>{inv.sale_number}</Link> },
               { label: "Invoice date", value: format(parseISO(inv.issue_date), "dd MMM yyyy") },
-              { label: "Due date", value: format(parseISO(inv.due_date), "dd MMM yyyy") },
+              { label: "Due date", value: inv.due_date ? format(parseISO(inv.due_date), "dd MMM yyyy") : "Not specified" },
               { label: "Place of supply", value: inv.place_of_supply_state_code ? `${stateNameByCode(inv.place_of_supply_state_code)} (${inv.place_of_supply_state_code})` : "—" },
+              ...(inv.version > 1 ? [{ label: "Current version", value: `v${inv.version} · ${format(new Date(inv.versions[0]!.created_at), "dd MMM yyyy, hh:mm a")}` }] : []),
               ...(inv.supply_type ? [{ label: "Tax type", value: inv.supply_type === "intra" ? "CGST + SGST" : "IGST" }] : []),
               ...(snap?.billingAddress ? [{ label: "Billing address", value: snap.billingAddress }] : []),
               ...(inv.payment_terms || inv.notes ? [{ label: "Terms & notes", value: [inv.payment_terms, inv.notes].filter(Boolean).join("\n") }] : []),
@@ -151,6 +156,7 @@ export function InvoiceDetail({ id }: { id: string }) {
                 {!isDraft && <Button fullWidth variant="outlined" startIcon={<DownloadIcon />} href={`${pdf}?download=1`}>Download</Button>}
                 {isDraft && <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit draft</Button>}
                 {isDraft && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("delete")}>Delete draft</Button>}
+                {inv.status === "issued" && <Button fullWidth variant="outlined" startIcon={<RefreshIcon />} onClick={() => setDialog("regen")}>Regenerate invoice</Button>}
                 {inv.status === "issued" && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("cancel")}>Cancel invoice</Button>}
               </HeroActions>
             }
@@ -177,7 +183,7 @@ export function InvoiceDetail({ id }: { id: string }) {
       )}
         {isDraft && <Alert severity="info" sx={{ mb: 2 }}>Draft: not numbered and not yet a financial record. Review it, then issue it.</Alert>}
         {inv.status === "cancelled" && <Alert severity="error" sx={{ mb: 2 }}>Cancelled on {inv.cancelled_at && format(new Date(inv.cancelled_at), "dd MMM yyyy")}: {inv.cancel_reason}</Alert>}
-        {inv.status === "issued" && inv.is_overdue && <Alert severity="warning" sx={{ mb: 2 }}>This invoice was due on {format(parseISO(inv.due_date), "dd MMM yyyy")} and still has a balance of {formatMoney(inv.balance_due)}.</Alert>}
+        {inv.status === "issued" && inv.is_overdue && inv.due_date && <Alert severity="warning" sx={{ mb: 2 }}>This invoice was due on {format(parseISO(inv.due_date), "dd MMM yyyy")} and still has a balance of {formatMoney(inv.balance_due)}.</Alert>}
 
         <DetailViewTabs tabs={tabs} activeTab={Math.min(tab, tabs.length - 1)} onChange={setTab}>
           <DetailTabPanel value={tab} index={0}>
@@ -236,6 +242,33 @@ export function InvoiceDetail({ id }: { id: string }) {
             {live.length > 0 && <Typography variant="caption" color="text.secondary">To cancel this invoice, first reverse its payment allocations from the payment page.</Typography>}
             </DetailTabPanel>
           )}
+          {!isDraft && (
+            <DetailTabPanel value={tab} index={tabs.findIndex((t) => t.key === "versions")}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                Every time this invoice is regenerated a new version is added. The number, date and amounts never change; each version keeps the details and layout it was made with.
+              </Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead><TableRow><TableCell>Version</TableCell><TableCell>Generated</TableCell><TableCell>By</TableCell><TableCell>Note</TableCell><TableCell>Status</TableCell><TableCell align="right">Document</TableCell></TableRow></TableHead>
+                  <TableBody>
+                    {inv.versions.map((v) => (
+                      <TableRow key={v.version_no}>
+                        <TableCell sx={{ fontWeight: 600 }}>v{v.version_no}{v.version_no === 1 && <Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}> · original</Box>}</TableCell>
+                        <TableCell>{format(new Date(v.created_at), "dd MMM yyyy, hh:mm a")}</TableCell>
+                        <TableCell>{v.created_by_name ?? "—"}</TableCell>
+                        <TableCell>{v.reason ?? "—"}</TableCell>
+                        <TableCell>{v.is_current ? "Current" : "Superseded"}</TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                          <Button size="small" href={`${pdf}?version=${v.version_no}`} target="_blank" rel="noopener">View</Button>
+                          <Button size="small" href={`${pdf}?version=${v.version_no}&download=1`}>Download</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </DetailTabPanel>
+          )}
         </DetailViewTabs>
       </DetailViewLayout>
 
@@ -246,6 +279,16 @@ export function InvoiceDetail({ id }: { id: string }) {
       {dialog === "cancel" && (
         <ReasonDialog title="Cancel invoice" confirmLabel="Cancel invoice" onClose={() => setDialog(null)} onSubmit={cancel}
           message={<>Cancelling <strong>{inv.invoice_number}</strong> keeps its number and record but removes it from outstanding balances. This cannot be undone.</>} />
+      )}
+      {dialog === "regen" && inv.invoice_number && (
+        <RegenerateInvoiceDialog
+          invoiceId={id}
+          invoiceNumber={inv.invoice_number}
+          issueDate={inv.issue_date}
+          dueDate={inv.due_date}
+          onClose={() => setDialog(null)}
+          onDone={(v) => { setDialog(null); notify.success(`Invoice regenerated (version ${v}). The earlier versions are kept under Versions.`); reload(); }}
+        />
       )}
       {dialog === "pay" && (
         <RecordPaymentDialog clientId={inv.client_id} saleId={inv.sale_id} saleNumber={inv.sale_number} suggestedAmount={inv.balance_due} focusInvoiceId={inv.id} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); reload(); }} />

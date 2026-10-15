@@ -3,7 +3,7 @@ import { amountInWordsINR } from "@/lib/words";
 import { stateNameByCode } from "@/lib/india";
 import { formatScaled, parseScaled } from "@/lib/money";
 import type { DocumentSnapshot } from "@/lib/billing";
-import { COLORS, FONT, PAGE, dmySlash, ensureRoom, joinLines, newDoc, rule, rupee, sectionLabel, toBuffer, watermark } from "./common";
+import { COLORS, FONT, PAGE, dmySlash, ensureRoom, joinLines, newDoc, rule, rupee, sectionLabel, signatureImage, toBuffer, watermark } from "./common";
 import type { ClientSnapshot, CompanySnapshot, InvoiceItemRow, InvoiceRow } from "@/features/invoices/service";
 
 export interface InvoicePdfData {
@@ -29,6 +29,14 @@ function line(doc: Doc, text: string, x: number, y: number, width: number, opts:
   return doc.y + 2.5;
 }
 
+/** "Label: value" on one line: the label in the usual weight, the value bold. Returns the y for the next line. */
+function labelled(doc: Doc, label: string, value: string, x: number, y: number, width: number, opts: { size?: number; labelColor?: string; valueColor?: string } = {}): number {
+  const size = opts.size ?? 9;
+  doc.font(FONT.regular).fontSize(size).fillColor(opts.labelColor ?? COLORS.ink).text(`${label}: `, x, y, { width, continued: true });
+  doc.font(FONT.bold).fillColor(opts.valueColor ?? COLORS.ink).text(value, { continued: false });
+  return doc.y + 2.5;
+}
+
 function header(doc: Doc, d: InvoicePdfData): number {
   const c = d.company;
   const isTax = Boolean(c.gstin);
@@ -44,7 +52,7 @@ function header(doc: Doc, d: InvoicePdfData): number {
   y += 9;
   if (c.trade_name && c.trade_name !== c.legal_name) y = line(doc, c.legal_name, L, y, leftW, { size: 10.5 }) + 1;
   y = line(doc, joinLines(c.address, [c.city, c.state, c.postal_code].filter(Boolean).join(", ")), L, y, leftW, { size: 8.5, color: COLORS.muted });
-  if (c.gstin) y = line(doc, `GSTIN: ${c.gstin}`, L, y, leftW, { size: 8.5, color: COLORS.muted });
+  if (c.gstin) y = labelled(doc, "GSTIN", c.gstin, L, y, leftW, { size: 9, labelColor: COLORS.muted, valueColor: COLORS.ink });
 
   const rx = L + leftW + 14;
   const rw = W - leftW - 14;
@@ -56,7 +64,17 @@ function header(doc: Doc, d: InvoicePdfData): number {
   doc.roundedRect(rx + rw - cw, ry, cw, 15, 7.5).fill(COLORS.chip);
   doc.fillColor(COLORS.body).text(chip, rx + rw - cw, ry + 4.5, { width: cw, align: "center", characterSpacing: 0.6 });
   ry += 24;
-  ry = line(doc, `Invoice No. ${d.invoice.invoice_number ?? "DRAFT (not numbered)"}`, rx, ry, rw, { size: 9.5, align: "right" }) + 1;
+  // "Invoice No." in the usual weight, the number itself bold and larger, the pair right-aligned.
+  const label = "Invoice No. ";
+  const number = d.invoice.invoice_number ?? "DRAFT (not numbered)";
+  doc.font(FONT.regular).fontSize(9.5);
+  const labelW = doc.widthOfString(label);
+  doc.font(FONT.bold).fontSize(12);
+  const numberW = doc.widthOfString(number);
+  const nx = rx + rw - numberW;
+  doc.font(FONT.regular).fontSize(9.5).fillColor(COLORS.muted).text(label, nx - labelW, ry + 2.2, { lineBreak: false });
+  doc.font(FONT.bold).fontSize(12).fillColor(COLORS.ink).text(number, nx, ry, { lineBreak: false });
+  ry += 18;
   line(doc, `Invoice Date: ${dmySlash(d.invoice.issue_date)}`, rx, ry, rw, { size: 9.5, align: "right" });
   return Math.max(y, doc.y);
 }
@@ -70,7 +88,7 @@ function parties(doc: Doc, d: InvoicePdfData, top: number): number {
   let ly = line(doc, cl.legalName || cl.name, L, top + 13, leftW, { size: 11, bold: true });
   const address = joinLines(cl.billingAddress, [cl.city, cl.postalCode].filter(Boolean).join(", "));
   if (address) ly = line(doc, address, L, ly, leftW);
-  ly = line(doc, `GSTIN: ${cl.gstin || "Not provided"}`, L, ly, leftW);
+  ly = labelled(doc, "GSTIN", cl.gstin || "Not provided", L, ly, leftW);
   if (cl.state) ly = line(doc, `State: ${cl.state}${cl.stateCode ? ` (${cl.stateCode})` : ""}`, L, ly, leftW);
   const pos = d.invoice.place_of_supply_state_code;
   if (pos && pos !== cl.stateCode) ly = line(doc, `Place of supply: ${stateNameByCode(pos) ?? ""} (${pos})`, L, ly, leftW);
@@ -97,6 +115,8 @@ function lineTitle(it: InvoiceItemRow, m: Milestone | null | undefined): string 
 }
 
 interface Note { text: string; bold?: boolean }
+/** The notes under a line: readable body text, with the SAC/HSN code bold and a size up. */
+const noteSize = (n: Note) => (n.bold ? 9.5 : 8.5);
 
 /** Small notes under a line: the milestone's deliverables and share, the SAC/HSN code (bold), quantity and rate when they are not simply 1, and the GST rate when rates differ. */
 function lineNotes(it: InvoiceItemRow, mixedRates: boolean, m: Milestone | null | undefined): Note[] {
@@ -127,14 +147,14 @@ function services(doc: Doc, d: InvoicePdfData, top: number): number {
     rule(doc, at + 19);
     return at + 29;
   };
-  y = tableHead(y + 20);
+  y = tableHead(y + 18);
 
   for (const it of d.items) {
     const notes = lineNotes(it, mixed, milestone);
     const title = lineTitle(it, milestone);
     doc.font(FONT.bold).fontSize(10);
     const titleH = doc.heightOfString(title, { width: textW });
-    const notesH = notes.reduce((a, n) => a + doc.font(n.bold ? FONT.bold : FONT.regular).fontSize(7.5).heightOfString(n.text, { width: textW }) + 2, 0);
+    const notesH = notes.reduce((a, n) => a + doc.font(n.bold ? FONT.bold : FONT.regular).fontSize(noteSize(n)).heightOfString(n.text, { width: textW }) + 3, 0);
     const h = titleH + notesH + 8;
     if (y + h > PAGE.bottom) {
       doc.addPage();
@@ -144,8 +164,8 @@ function services(doc: Doc, d: InvoicePdfData, top: number): number {
     doc.font(FONT.regular).text(rupee(it.taxable_amount), L + W - AMOUNT_W, y, { width: AMOUNT_W, align: "right" });
     let ny = y + titleH + 2;
     for (const n of notes) {
-      doc.font(n.bold ? FONT.bold : FONT.regular).fontSize(7.5).fillColor(n.bold ? COLORS.body : COLORS.muted).text(n.text, L, ny, { width: textW });
-      ny = doc.y + 2;
+      doc.font(n.bold ? FONT.bold : FONT.regular).fontSize(noteSize(n)).fillColor(n.bold ? COLORS.ink : COLORS.body).text(n.text, L, ny, { width: textW });
+      ny = doc.y + 3;
     }
     y += h;
   }
@@ -184,13 +204,13 @@ function summary(doc: Doc, d: InvoicePdfData, top: number): number {
   for (const [k, v] of rows) {
     doc.font(FONT.regular).fontSize(10).fillColor(COLORS.body).text(k, L, y + 1, { width: W - AMOUNT_W });
     doc.font(FONT.bold).fontSize(11).fillColor(COLORS.ink).text(v, L + W - AMOUNT_W, y, { width: AMOUNT_W, align: "right" });
-    y += 21;
+    y += 18;
   }
   rule(doc, y - 4);
-  y += 8;
+  y += 7;
   doc.font(FONT.bold).fontSize(14).fillColor(COLORS.ink).text("Invoice total", L, y, { width: W - AMOUNT_W - 20 });
   doc.fillColor(COLORS.accent).text(rupee(inv.total), L + W - 200, y, { width: 200, align: "right" });
-  y += 24;
+  y += 22;
   y = line(doc, `Amount in words: ${amountInWordsINR(inv.total)}`, L, y, W, { size: 8.5, color: COLORS.muted, align: "right" });
   return y;
 }
@@ -198,34 +218,52 @@ function summary(doc: Doc, d: InvoicePdfData, top: number): number {
 function payment(doc: Doc, d: InvoicePdfData, top: number): number {
   const c = d.company;
   const inv = d.invoice;
-  const bank = [
-    c.bank_name && `Bank: ${c.bank_name}${c.bank_branch ? `, ${c.bank_branch}` : ""}`,
-    c.bank_account_number && `Account: ${c.bank_account_number}${c.bank_account_name ? ` (${c.bank_account_name})` : ""}`,
-    c.bank_ifsc && `IFSC: ${c.bank_ifsc}`,
-    c.upi_id && `UPI: ${c.upi_id}`,
-  ].filter(Boolean).join(" · ");
+  // Bank details one per line (label muted, value bold) in the left column; due date and reference stacked on the right.
+  const bank = ([
+    ["Account name", c.bank_account_name],
+    ["Bank", [c.bank_name, c.bank_branch].filter(Boolean).join(", ")],
+    ["Account no.", c.bank_account_number],
+    ["IFSC", c.bank_ifsc],
+    ["UPI ID", c.upi_id],
+  ] as const).filter((r): r is [(typeof r)[0], string] => Boolean(r[1]));
+  const LEFT_W = 300;
+  const RIGHT_X = L + 340;
+  const RIGHT_W = L + W - RIGHT_X;
+  const VALUE_X = L + 82;
+  const valueH = (v: string) => Math.max(13.5, doc.font(FONT.bold).fontSize(10).heightOfString(v, { width: LEFT_W - 82 }) + 2.5);
+  const bankH = bank.length ? bank.reduce((a, [, v]) => a + valueH(v), 0) : 0;
+  const detailsH = Math.max(bankH, 64);
   const terms = joinLines(inv.payment_terms, inv.notes);
   doc.font(FONT.regular).fontSize(8.5);
-  const bankH = bank ? doc.heightOfString(bank, { width: W }) + 8 : 0;
   const termsH = terms ? doc.heightOfString(terms, { width: W }) + 8 : 0;
 
-  let y = ensureRoom(doc, top + 14, 70 + bankH + termsH);
+  let y = ensureRoom(doc, top + 6, 34 + detailsH + termsH);
   rule(doc, y - 6, { color: COLORS.faint });
-  y += 8;
+  y += 7;
   sectionLabel(doc, "PAYMENT INFORMATION", L, y, W);
-  y += 20;
-  doc.font(FONT.regular).fontSize(8.5).fillColor(COLORS.muted).text("Payment due date", L, y, { width: MID - L - 16 });
-  doc.text("Payment reference", MID, y, { width: MID_W });
-  doc.font(FONT.bold).fontSize(11).fillColor(COLORS.ink).text(dmySlash(inv.due_date), L, y + 13, { width: MID - L - 16 });
-  doc.text(inv.invoice_number ?? "Assigned on issue", MID, y + 13, { width: MID_W });
-  y += 36;
-  if (bank) y = line(doc, bank, L, y, W, { size: 8.5, color: COLORS.muted }) + 1;
+  y += 16;
+
+  doc.font(FONT.regular).fontSize(8.5).fillColor(COLORS.muted).text("Payment due date", RIGHT_X, y, { width: RIGHT_W });
+  doc.font(FONT.bold).fontSize(11).fillColor(COLORS.ink).text(inv.due_date ? dmySlash(inv.due_date) : "Not specified", RIGHT_X, y + 13, { width: RIGHT_W });
+  doc.font(FONT.regular).fontSize(8.5).fillColor(COLORS.muted).text("Payment reference", RIGHT_X, y + 34, { width: RIGHT_W });
+  doc.font(FONT.bold).fontSize(11).fillColor(COLORS.ink).text(inv.invoice_number ?? "Assigned on issue", RIGHT_X, y + 47, { width: RIGHT_W });
+
+  if (bank.length) {
+    let by = y;
+    for (const [label, value] of bank) {
+      doc.font(FONT.regular).fontSize(9).fillColor(COLORS.muted).text(label, L, by + 1, { width: 78, lineBreak: false });
+      doc.font(FONT.bold).fontSize(10).fillColor(COLORS.ink).text(value, VALUE_X, by, { width: LEFT_W - 82 });
+      by += valueH(value);
+    }
+  }
+  y += detailsH + 2;
   if (terms) y = line(doc, terms, L, y, W, { size: 8.5, color: COLORS.muted }) + 1;
   return y;
 }
 
-const SIGN_SPACE = 44; // blank room to sign by hand
-const SIGN_LINE_W = 190;
+const SIGN_SPACE = 34; // blank room to sign by hand when there is no printed signature
+const SIGN_IMAGE_H = 54; // room for the printed signature
+const SIGN_LINE_MIN_W = 200;
 
 function signatory(doc: Doc, d: InvoicePdfData, top: number) {
   const c = d.company;
@@ -233,18 +271,38 @@ function signatory(doc: Doc, d: InvoicePdfData, top: number) {
   const contact = [c.legal_name, c.email, c.website].filter(Boolean).join(" · ");
   doc.font(FONT.regular).fontSize(8.5);
   const declH = declaration ? doc.heightOfString(declaration, { width: W }) + 12 : 0;
+  // On every generated invoice, drafts included, so a preview looks the same as the invoice it becomes (a draft is watermarked).
+  const sign = signatureImage();
+  const space = sign ? SIGN_IMAGE_H : SIGN_SPACE;
+
+  // One column, all centred on the signing line: "For ...", the signature resting on the line, then the title.
+  // The line is as wide as the widest of its texts so the block lines up.
+  const forText = `For ${c.trade_name || c.legal_name}`;
+  const titleMain = "Authorised signatory";
+  const titleName = c.signatory_name ? ` · ${c.signatory_name}` : "";
+  const forW = doc.font(FONT.bold).fontSize(9).widthOfString(forText);
+  const mainW = doc.font(FONT.regular).fontSize(10.5).widthOfString(titleMain);
+  const nameW = titleName ? doc.font(FONT.regular).fontSize(10.5).widthOfString(titleName) : 0;
+  const lineW = Math.min(W, Math.max(SIGN_LINE_MIN_W, forW, mainW + nameW));
+  const centre = L + lineW / 2;
 
   // Kept together: the company line, the signing space, the line and the title never split across pages.
-  let y = ensureRoom(doc, top + 8, 54 + SIGN_SPACE + declH); // rule, company line, signing space, signature line, title and contact line
-  rule(doc, y - 6, { color: COLORS.faint });
+  let y = ensureRoom(doc, top + 16, 58 + space + declH); // rule, company line, signing space, signature line, title and contact line
+  rule(doc, y - 6, { color: COLORS.faint }); // clear of the payment details above it
   y += 10;
   if (declaration) y = line(doc, declaration, L, y, W, { size: 8.5, color: COLORS.muted }) + 8;
-  y = line(doc, `For ${c.trade_name || c.legal_name}`, L, y, W, { size: 9, bold: true });
-  y += SIGN_SPACE;
-  doc.moveTo(L, y).lineTo(L + SIGN_LINE_W, y).lineWidth(0.7).strokeColor(COLORS.muted).stroke();
-  doc.font(FONT.regular).fontSize(10.5).fillColor(COLORS.ink).text("Authorised signatory", L, y + 5, { width: W, continued: Boolean(c.signatory_name) });
-  if (c.signatory_name) doc.fillColor(COLORS.muted).text(` · ${c.signatory_name}`);
-  line(doc, contact, L, doc.y + 6, W, { size: 8.5, color: COLORS.muted });
+  doc.font(FONT.bold).fontSize(9).fillColor(COLORS.ink).text(forText, L, y, { width: lineW, align: "center", lineBreak: false });
+  y = doc.y + 4;
+  const lineY = y + space;
+  if (sign) {
+    const boxW = Math.min(lineW - 20, 150);
+    doc.image(sign, centre - boxW / 2, y, { fit: [boxW, space + 3], align: "center", valign: "bottom" }); // rests on the line
+  }
+  doc.moveTo(L, lineY).lineTo(L + lineW, lineY).lineWidth(0.7).strokeColor(COLORS.muted).stroke();
+  const tx = centre - (mainW + nameW) / 2;
+  doc.font(FONT.regular).fontSize(10.5).fillColor(COLORS.ink).text(titleMain, tx, lineY + 5, { lineBreak: false });
+  if (titleName) doc.fillColor(COLORS.muted).text(titleName, tx + mainW, lineY + 5, { lineBreak: false });
+  line(doc, contact, L, lineY + 22, W, { size: 8.5, color: COLORS.muted });
 }
 
 export async function buildInvoicePdf(d: InvoicePdfData): Promise<Buffer> {
@@ -252,9 +310,9 @@ export async function buildInvoicePdf(d: InvoicePdfData): Promise<Buffer> {
   const doc = newDoc(d.invoice.invoice_number ? `Invoice ${d.invoice.invoice_number}` : "Draft invoice", d.invoice.issued_at ? new Date(d.invoice.issued_at) : undefined);
   let y = header(doc, d) + 14;
   rule(doc, y, { color: COLORS.accent, weight: 1.5 });
-  y = parties(doc, d, y + 18) + 12;
+  y = parties(doc, d, y + 14) + 8;
   rule(doc, y, { color: COLORS.faint });
-  y = services(doc, d, y + 16);
+  y = services(doc, d, y + 12);
   y = summary(doc, d, y);
   y = payment(doc, d, y);
   signatory(doc, d, y);

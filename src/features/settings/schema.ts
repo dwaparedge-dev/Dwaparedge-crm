@@ -33,5 +33,7 @@ export const settingsSchema = z
   .superRefine((v, ctx) => {
     if (v.gstin && v.gstin.slice(0, 2) !== v.stateCode) ctx.addIssue({ code: "custom", path: ["stateCode"], message: "State does not match the GSTIN state code" });
     if (v.gstin && v.pan && v.gstin.slice(2, 12) !== v.pan) ctx.addIssue({ code: "custom", path: ["pan"], message: "PAN does not match the GSTIN" });
-  });
+  })
+  // The PAN is the middle of the GSTIN, so a blank PAN is filled from it.
+  .transform((v) => ({ ...v, pan: v.pan ?? (v.gstin ? v.gstin.slice(2, 12) : null) }));
 export type SettingsInput = z.infer<typeof settingsSchema>;

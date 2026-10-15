@@ -13,15 +13,21 @@ BEGIN
   IF NEW.status NOT IN ('issued','cancelled') THEN
     RAISE EXCEPTION 'An issued invoice cannot go back to %', NEW.status USING ERRCODE = 'check_violation';
   END IF;
-  IF ROW(NEW.invoice_number, NEW.client_id, NEW.sale_id, NEW.issue_date, NEW.due_date, NEW.currency,
+  IF ROW(NEW.invoice_number, NEW.client_id, NEW.sale_id, NEW.currency,
          NEW.place_of_supply_state_code, NEW.supply_type, NEW.subtotal, NEW.cgst_total, NEW.sgst_total, NEW.igst_total,
          NEW.tax_total, NEW.round_off, NEW.total, NEW.payment_terms, NEW.notes, NEW.client_snapshot, NEW.company_snapshot, NEW.document_snapshot,
          NEW.issued_at, NEW.issued_by)
      IS DISTINCT FROM
-     ROW(OLD.invoice_number, OLD.client_id, OLD.sale_id, OLD.issue_date, OLD.due_date, OLD.currency,
+     ROW(OLD.invoice_number, OLD.client_id, OLD.sale_id, OLD.currency,
          OLD.place_of_supply_state_code, OLD.supply_type, OLD.subtotal, OLD.cgst_total, OLD.sgst_total, OLD.igst_total,
          OLD.tax_total, OLD.round_off, OLD.total, OLD.payment_terms, OLD.notes, OLD.client_snapshot, OLD.company_snapshot, OLD.document_snapshot,
          OLD.issued_at, OLD.issued_by) THEN
+    RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
+  END IF;
+  -- The invoice date and the due date are the two terms that may change after issue, and only while an invoice is being
+  -- regenerated (the service sets this flag for its own transaction); the change is audited in the activity log and the version note.
+  IF (NEW.issue_date IS DISTINCT FROM OLD.issue_date OR NEW.due_date IS DISTINCT FROM OLD.due_date)
+     AND COALESCE(current_setting('app.invoice_dates_change', true), '') <> 'on' THEN
     RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -29,6 +35,15 @@ END $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS invoices_guard_update ON invoices;
 CREATE TRIGGER invoices_guard_update BEFORE UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION guard_invoice_update();
+
+-- Regenerated invoice versions are a permanent record: added, never edited or removed.
+CREATE OR REPLACE FUNCTION guard_invoice_version() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'Invoice versions are permanent records and cannot be changed or deleted' USING ERRCODE = 'check_violation';
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS invoice_versions_guard ON invoice_versions;
+CREATE TRIGGER invoice_versions_guard BEFORE UPDATE OR DELETE ON invoice_versions FOR EACH ROW EXECUTE FUNCTION guard_invoice_version();
 
 CREATE OR REPLACE FUNCTION guard_payment_update() RETURNS trigger AS $$
 BEGIN

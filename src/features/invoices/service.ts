@@ -13,6 +13,7 @@ import { buildBillingStatement, planShares, type BillMode, type DocumentSnapshot
 import { formatScaled, parseScaled } from "@/lib/money";
 import { likePattern } from "@/lib/validation";
 import { stateNameByCode } from "@/lib/india";
+import { buildInvoicePdf } from "@/lib/pdf/invoice";
 import { getSettings, type CompanySettings } from "@/features/settings/service";
 import { getMilestones, getSaleItems, getSaleRow } from "@/features/sales/service";
 import type { BillSaleInput } from "@/features/sales/schema";
@@ -28,7 +29,8 @@ export interface InvoiceRow {
   sale_id: string;
   sale_number: string;
   issue_date: string;
-  due_date: string;
+  /** null = no due date specified. */
+  due_date: string | null;
   currency: string;
   place_of_supply_state_code: string | null;
   supply_type: "intra" | "inter" | null;
@@ -48,6 +50,14 @@ export interface InvoiceRow {
   payment_status: PaymentStatus;
   is_overdue: boolean;
 }
+/** One generated copy of an issued invoice. Version 1 is the original; the highest is the one in use. */
+export interface InvoiceVersionRow {
+  version_no: number;
+  reason: string | null;
+  created_at: string;
+  created_by_name: string | null;
+  is_current: boolean;
+}
 export interface InvoiceItemRow {
   id: string; position: number; sale_item_id: string; product_id: string | null; description: string; hsn_sac: string | null; quantity: string; unit_price: string;
   discount_percent: string; tax_rate: string; taxable_amount: string; cgst_amount: string; sgst_amount: string; igst_amount: string; tax_amount: string; line_total: string;
@@ -59,14 +69,16 @@ const TODAY = "(now() AT TIME ZONE 'Asia/Kolkata')::date";
 const PAID = `COALESCE((SELECT sum(a.amount) FROM payment_allocations a WHERE a.invoice_id = i.id AND a.reversed_at IS NULL), 0)`;
 
 const SELECT = `
-  SELECT i.id, i.invoice_number, i.status, i.client_id, COALESCE(i.client_snapshot->>'name', c.display_name) AS client_name, i.sale_id, s.sale_number,
+  SELECT i.id, i.invoice_number, i.status, i.client_id, COALESCE(
+           (SELECT v.client_snapshot->>'name' FROM invoice_versions v WHERE v.invoice_id = i.id ORDER BY v.version_no DESC LIMIT 1),
+           i.client_snapshot->>'name', c.display_name) AS client_name, i.sale_id, s.sale_number,
          to_char(i.issue_date,'YYYY-MM-DD') AS issue_date, to_char(i.due_date,'YYYY-MM-DD') AS due_date, i.currency,
          i.place_of_supply_state_code, i.supply_type, i.subtotal, i.cgst_total, i.sgst_total, i.igst_total, i.tax_total, i.round_off, i.total,
          i.payment_terms, i.notes, i.client_snapshot, i.company_snapshot, i.document_snapshot, i.issued_at, i.cancelled_at, i.cancel_reason, i.created_at, i.updated_at,
          ${PAID} AS amount_paid,
          CASE WHEN i.status = 'issued' THEN i.total - ${PAID} ELSE 0 END AS balance_due,
          CASE WHEN ${PAID} >= i.total THEN 'paid' WHEN ${PAID} > 0 THEN 'partial' ELSE 'unpaid' END AS payment_status,
-         (i.status = 'issued' AND i.total - ${PAID} > 0 AND i.due_date < ${TODAY}) AS is_overdue
+         COALESCE(i.status = 'issued' AND i.total - ${PAID} > 0 AND i.due_date < ${TODAY}, false) AS is_overdue
   FROM invoices i JOIN clients c ON c.id = i.client_id JOIN sales s ON s.id = i.sale_id`;
 
 export async function listInvoices(p: z.infer<typeof listInvoicesSchema>) {
@@ -120,17 +132,59 @@ export async function listInvoices(p: z.infer<typeof listInvoicesSchema>) {
   };
 }
 
-export async function getInvoice(id: string, runner?: PoolClient) {
+/**
+ * The SAC/HSN code of each sale item, as the sale has it now (blank ones left out). The invoice takes its codes from
+ * here, the same way it takes the project details: when it is drawn up, issued and regenerated.
+ */
+async function saleCodes(saleItemIds: string[], runner?: PoolClient): Promise<Map<string, string>> {
+  if (!saleItemIds.length) return new Map();
+  const rows = await db.query<{ id: string; hsn_sac: string | null }>("SELECT id, btrim(hsn_sac) AS hsn_sac FROM sale_items WHERE id = ANY($1::uuid[])", [saleItemIds], runner);
+  return new Map(rows.filter((r) => r.hsn_sac).map((r) => [r.id, r.hsn_sac!]));
+}
+
+async function loadInvoice(id: string, runner?: PoolClient) {
   const inv = await db.queryOne<InvoiceRow>(`${SELECT} WHERE i.id = $1`, [id], runner);
   if (!inv) throw new AppError("Invoice not found", 404, "NOT_FOUND");
-  const items = await db.query<InvoiceItemRow>("SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY position", [id], runner);
+  let items = await db.query<InvoiceItemRow>("SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY position", [id], runner);
+  if (inv.status === "draft") {
+    // A draft always shows (and will be issued with) the sale's current codes.
+    const codes = await saleCodes(items.map((i) => i.sale_item_id), runner);
+    items = items.map((i) => ({ ...i, hsn_sac: codes.get(i.sale_item_id) ?? i.hsn_sac }));
+  }
+  return { ...inv, items };
+}
+
+/** The invoice as it stands: its row, with the party and project details of the current version when it has been regenerated. */
+export async function getInvoice(id: string, runner?: PoolClient) {
+  const base = await loadInvoice(id, runner);
   const allocations = await db.query<{ id: string; payment_id: string; receipt_number: string; payment_date: string; method: string; amount: string; reversed_at: string | null; created_at: string }>(
     `SELECT a.id, a.payment_id, p.receipt_number, to_char(p.payment_date,'YYYY-MM-DD') AS payment_date, p.method, a.amount, a.reversed_at, a.created_at
      FROM payment_allocations a JOIN payments p ON p.id = a.payment_id WHERE a.invoice_id = $1 ORDER BY a.created_at`,
     [id],
     runner,
   );
-  return { ...inv, items, allocations };
+  if (base.status === "draft") return { ...base, allocations, version: 1, versions: [] as InvoiceVersionRow[] };
+
+  const stored = await db.query<{ version_no: number; reason: string | null; created_at: string; created_by_name: string | null }>(
+    `SELECT v.version_no, v.reason, v.created_at, u.name AS created_by_name
+     FROM invoice_versions v LEFT JOIN users u ON u.id = v.created_by WHERE v.invoice_id = $1 ORDER BY v.version_no DESC`,
+    [id],
+    runner,
+  );
+  const current = stored[0]?.version_no ?? 1;
+  const versions: InvoiceVersionRow[] = stored.map((v) => ({ ...v, is_current: v.version_no === current }));
+  if (!stored.some((v) => v.version_no === 1)) {
+    // Issued before versions were recorded (or not regenerated yet): the original is the invoice row itself.
+    const issuer = await db.queryOne<{ name: string | null }>("SELECT u.name FROM invoices i LEFT JOIN users u ON u.id = i.issued_by WHERE i.id = $1", [id], runner);
+    versions.push({ version_no: 1, reason: null, created_at: base.issued_at ?? base.created_at, created_by_name: issuer?.name ?? null, is_current: current === 1 });
+  }
+  const latest = stored[0]
+    ? await db.queryOne<{ client_snapshot: ClientSnapshot; company_snapshot: CompanySnapshot; document_snapshot: DocumentSnapshot | null; item_codes: Record<string, string | null> | null }>(
+        "SELECT client_snapshot, company_snapshot, document_snapshot, item_codes FROM invoice_versions WHERE invoice_id = $1 AND version_no = $2", [id, current], runner)
+    : null;
+  const { item_codes: itemCodes, ...snapshots } = latest ?? { item_codes: null };
+  const items = itemCodes ? base.items.map((i) => ({ ...i, hsn_sac: itemCodes[i.id] ?? i.hsn_sac })) : base.items;
+  return { ...base, ...snapshots, items, allocations, version: current, versions };
 }
 
 /** Prices the lines with the right GST split and totals. Everything the DB stores comes from here. */
@@ -164,11 +218,13 @@ const snapshotCompany = (settings: CompanySettings): CompanySnapshot => ({
  * The project references, the milestone this invoice bills and the billing schedule, as they stand now.
  * Called when the invoice is issued (and stored), and for the live preview of a draft.
  */
-async function buildDocumentSnapshot(invoiceId: string, saleId: string, invoiceSubtotal: string, runner?: PoolClient): Promise<DocumentSnapshot> {
+async function buildDocumentSnapshot(invoiceId: string, saleId: string, invoiceSubtotal: string, runner?: PoolClient, issuedBefore: string | null = null): Promise<DocumentSnapshot> {
   const sale = await getSaleRow(saleId, runner);
   const milestones = await getMilestones(saleId, sale.subtotal, runner);
+  // Regenerating an older invoice must not count the invoices issued after it as "billed before".
   const before = await db.queryOne<{ billed: string }>(
-    "SELECT COALESCE(sum(subtotal), 0) AS billed FROM invoices WHERE sale_id = $1 AND status = 'issued' AND id <> $2", [saleId, invoiceId], runner,
+    "SELECT COALESCE(sum(subtotal), 0) AS billed FROM invoices WHERE sale_id = $1 AND status = 'issued' AND id <> $2 AND ($3::timestamptz IS NULL OR issued_at < $3::timestamptz)",
+    [saleId, invoiceId, issuedBefore], runner,
   );
   const mine = milestones.find((m) => m.invoice_id === invoiceId) ?? null;
   const statement = buildBillingStatement({
@@ -343,7 +399,7 @@ export async function deleteDraft(id: string, actorId: string) {
  * and releases the number.
  */
 export async function issueInvoice(id: string, actorId: string) {
-  return db.transaction(async (tx) => {
+  const number = await db.transaction(async (tx) => {
     const cur = await lockInvoice(tx, id);
     if (cur.status !== "draft") throw new AppError(`This invoice is already ${cur.status}`, 409, "INVALID_TRANSITION");
 
@@ -363,7 +419,8 @@ export async function issueInvoice(id: string, actorId: string) {
     const itemRows = (await tx.query<{ sale_item_id: string; product_id: string | null; description: string; hsn_sac: string | null; quantity: string; unit_price: string; discount_percent: string; tax_rate: string }>(
       "SELECT sale_item_id, product_id, description, hsn_sac, quantity, unit_price, discount_percent, tax_rate FROM invoice_items WHERE invoice_id = $1 ORDER BY position", [id],
     )).rows;
-    const items = itemRows.map((r) => ({ saleItemId: r.sale_item_id, productId: r.product_id, description: r.description, hsnSac: r.hsn_sac, quantity: r.quantity, unitPrice: r.unit_price, discountPercent: r.discount_percent, taxRate: r.tax_rate }));
+    const codes = await saleCodes(itemRows.map((r) => r.sale_item_id), tx);
+    const items = itemRows.map((r) => ({ saleItemId: r.sale_item_id, productId: r.product_id, description: r.description, hsnSac: codes.get(r.sale_item_id) ?? r.hsn_sac, quantity: r.quantity, unitPrice: r.unit_price, discountPercent: r.discount_percent, taxRate: r.tax_rate }));
     const { pos, supply } = resolveSupply(settings, inv.place_of_supply_state_code, client.state_code);
     const { lines, totals } = price(items, supply, settings.round_off_total);
     if (Number(totals.total) <= 0) throw new AppError("An invoice must have a total greater than zero", 422, "VALIDATION_ERROR");
@@ -389,6 +446,10 @@ export async function issueInvoice(id: string, actorId: string) {
     await logActivity({ entityType: "invoice", entityId: id, clientId: inv.client_id, action: "issued", summary: `Invoice ${number} issued against ${sale.sale_number} (total ${totals.total})`, actorId, metadata: { number, total: totals.total, saleId: sale.id } }, tx);
     return number;
   });
+  // Keep the document as first issued, so a later layout change or regeneration never replaces what the client received.
+  // Best effort: without it the original is simply drawn from the invoice's frozen details when someone asks for it.
+  await db.transaction((tx) => ensureOriginalVersion(tx, id, actorId)).catch((e) => console.error("Could not store the original invoice document", e));
+  return number;
 }
 
 /** Issued invoices are never deleted. Cancelling keeps the number and frees the billed amount on the sale. */
@@ -470,4 +531,107 @@ export async function createDraftForSale(saleId: string, request: BillSaleInput,
     await logActivity({ entityType: "invoice", entityId: d.id, clientId: d.clientId, action: "created", summary: `Draft invoice created for sale ${d.saleNumber}${label ? ` (${label})` : ""}`, actorId }, tx);
     return d.id;
   });
+}
+
+type VersionSnapshots = { client: ClientSnapshot; company: CompanySnapshot; document: DocumentSnapshot | null };
+
+async function storeVersion(
+  tx: PoolClient, inv: Awaited<ReturnType<typeof loadInvoice>>, versionNo: number, snap: VersionSnapshots,
+  meta: { reason: string | null; actorId: string | null; at?: string | null; itemCodes?: Record<string, string | null> | null },
+) {
+  const { items, ...invoice } = inv;
+  const shown = meta.itemCodes ? items.map((i) => ({ ...i, hsn_sac: meta.itemCodes![i.id] ?? i.hsn_sac })) : items;
+  const pdf = await buildInvoicePdf({ invoice, items: shown, company: snap.company, client: snap.client, document: snap.document });
+  await tx.query(
+    `INSERT INTO invoice_versions (invoice_id, version_no, client_snapshot, company_snapshot, document_snapshot, item_codes, pdf, reason, created_by, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10::timestamptz, now()))`,
+    [inv.id, versionNo, JSON.stringify(snap.client), JSON.stringify(snap.company), snap.document ? JSON.stringify(snap.document) : null,
+      meta.itemCodes ? JSON.stringify(meta.itemCodes) : null, pdf, meta.reason, meta.actorId, meta.at ?? null],
+  );
+}
+
+/** Version 1 = the invoice as first issued. Stored once, from the invoice's own frozen details. */
+async function ensureOriginalVersion(tx: PoolClient, id: string, fallbackActor: string | null = null) {
+  if ((await tx.query("SELECT 1 FROM invoice_versions WHERE invoice_id = $1 AND version_no = 1", [id])).rowCount) return;
+  const inv = await loadInvoice(id, tx);
+  if (inv.status === "draft") return;
+  const issuer = (await tx.query<{ issued_by: string | null }>("SELECT issued_by FROM invoices WHERE id = $1", [id])).rows[0];
+  const ctx = await getInvoiceRenderContext(inv);
+  await storeVersion(tx, inv, 1, ctx, { reason: null, actorId: issuer?.issued_by ?? fallbackActor, at: inv.issued_at });
+}
+
+/**
+ * Makes a fresh copy of an issued invoice: the same number, lines and amounts (those are permanent), but with
+ * the client, company and project details as they are today and the current layout. The invoice date (to today) and
+ * the due date may be changed at the same time; both changes are written into the version's note. The copy is added as the next
+ * version; every earlier version stays and can still be opened with the date and time it was made.
+ */
+export async function regenerateInvoice(id: string, reason: string | null, actorId: string, dueDate?: string | null, updateInvoiceDate = false) {
+  return db.transaction(async (tx) => {
+    const cur = await lockInvoice(tx, id);
+    if (cur.status !== "issued") throw new AppError(`Only an issued invoice can be regenerated (this one is ${cur.status})`, 409, "INVALID_TRANSITION");
+
+    const settings = await getSettings(tx);
+    const missing = [!settings.legal_name && "company name", !settings.address && "company address", !settings.state_code && "company state"].filter(Boolean);
+    if (missing.length) throw new AppError(`Complete your company details in Settings first (${missing.join(", ")})`, 422, "SETTINGS_INCOMPLETE");
+
+    await ensureOriginalVersion(tx, id, actorId);
+
+    // `dueDate`: undefined keeps the current one, null means "not specified", a date sets it.
+    // `updateInvoiceDate`: moves the invoice date to today. The number keeps the month it was issued in.
+    const notes: string[] = [];
+    const was = (await tx.query<{ due_date: string | null; issue_date: string }>("SELECT to_char(due_date,'YYYY-MM-DD') AS due_date, to_char(issue_date,'YYYY-MM-DD') AS issue_date FROM invoices WHERE id = $1", [id])).rows[0]!;
+    const newIssue = updateInvoiceDate ? todayIST() : was.issue_date;
+    const newDue = dueDate === undefined ? was.due_date : dueDate;
+    const show = (d: string | null) => (d ? format(parseISO(d), "dd/MM/yyyy") : "not specified");
+    if (newDue !== null && newDue < newIssue) {
+      throw new AppError(`The due date (${show(newDue)}) cannot be before the invoice date (${show(newIssue)}). Choose a later due date or "Not specified".`, 422, "VALIDATION_ERROR");
+    }
+    if (newIssue !== was.issue_date || newDue !== was.due_date) {
+      await tx.query("SELECT set_config('app.invoice_dates_change', 'on', true)"); // lets the guard trigger allow this one change
+      try {
+        await tx.query("UPDATE invoices SET issue_date = $1, due_date = $2, updated_at = now() WHERE id = $3", [newIssue, newDue, id]);
+      } catch (e) {
+        // A database that has not had `npm run db:sync` / `npm run db:migrate` since this feature still locks the dates (or requires a due date).
+        const code = (e as { code?: string }).code;
+        if (code === "23514" || code === "23502") {
+          throw new AppError("The database has not been updated for changing invoice dates yet. Run `npm run db:sync` and then `npm run db:migrate`, then try again.", 409, "DATABASE_OUT_OF_DATE");
+        }
+        throw e;
+      }
+      if (newIssue !== was.issue_date) notes.push(`Invoice date changed from ${show(was.issue_date)} to ${show(newIssue)}`);
+      if (newDue !== was.due_date) notes.push(`Due date changed from ${show(was.due_date)} to ${show(newDue)}`);
+    }
+    const inv = await loadInvoice(id, tx);
+    const client = await loadClient(tx, inv.client_id);
+    const snap: VersionSnapshots = {
+      client: snapshotClient(client),
+      company: snapshotCompany(settings),
+      document: await buildDocumentSnapshot(id, inv.sale_id, inv.subtotal, tx, inv.issued_at),
+    };
+    const last = (await tx.query<{ n: number }>("SELECT max(version_no) AS n FROM invoice_versions WHERE invoice_id = $1", [id])).rows[0]?.n ?? 1;
+    const version = last + 1;
+
+    // SAC/HSN codes are read from the sale again, like the project details. The issued lines themselves cannot change,
+    // so the codes for this version are kept with it.
+    const fresh = await saleCodes(inv.items.map((i) => i.sale_item_id), tx);
+    const itemCodes: Record<string, string | null> = Object.fromEntries(inv.items.map((i) => [i.id, fresh.get(i.sale_item_id) ?? i.hsn_sac]));
+    const prev = (await tx.query<{ item_codes: Record<string, string | null> | null }>("SELECT item_codes FROM invoice_versions WHERE invoice_id = $1 AND version_no = $2", [id, last])).rows[0]?.item_codes ?? {};
+    if (inv.items.some((i) => (prev[i.id] ?? i.hsn_sac ?? null) !== (itemCodes[i.id] ?? null))) notes.push("SAC/HSN codes updated from the sale");
+    const note = [...notes, reason].filter(Boolean).join(". ") || null;
+    await storeVersion(tx, inv, version, snap, { reason: note, actorId, itemCodes });
+    await logActivity({ entityType: "invoice", entityId: id, clientId: cur.client_id, action: "regenerated", summary: `Invoice ${cur.invoice_number} regenerated (version ${version})${note ? `: ${note}` : ""}`, actorId, metadata: { version, changes: notes } }, tx);
+    return version;
+  });
+}
+
+/** The PDF kept for a version (default: the current one), or null when there is none and it has to be drawn live. */
+export async function getStoredInvoicePdf(id: string, version?: number) {
+  const row = await db.queryOne<{ pdf: Buffer; version_no: number; invoice_number: string | null }>(
+    `SELECT v.pdf, v.version_no, i.invoice_number FROM invoice_versions v JOIN invoices i ON i.id = v.invoice_id
+     WHERE v.invoice_id = $1 AND ($2::int IS NULL OR v.version_no = $2) ORDER BY v.version_no DESC LIMIT 1`,
+    [id, version ?? null],
+  );
+  if (!row && version !== undefined && version !== 1) throw new AppError("That version of the invoice does not exist", 404, "NOT_FOUND");
+  return row;
 }

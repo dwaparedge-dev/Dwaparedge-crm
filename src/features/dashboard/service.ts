@@ -74,7 +74,7 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
               COALESCE(sum(b.bal) FILTER (WHERE b.late BETWEEN 31 AND 60), 0) AS d60, count(*) FILTER (WHERE b.late BETWEEN 31 AND 60) AS n_d60,
               COALESCE(sum(b.bal) FILTER (WHERE b.late BETWEEN 61 AND 90), 0) AS d90, count(*) FILTER (WHERE b.late BETWEEN 61 AND 90) AS n_d90,
               COALESCE(sum(b.bal) FILTER (WHERE b.late > 90), 0) AS d90p, count(*) FILTER (WHERE b.late > 90) AS n_d90p
-       FROM (SELECT i.total - ${PAID("i")} AS bal, (${TODAY} - i.due_date) AS late FROM invoices i WHERE i.status = 'issued') b WHERE b.bal > 0`,
+       FROM (SELECT i.total - ${PAID("i")} AS bal, COALESCE(${TODAY} - i.due_date, 0) AS late FROM invoices i WHERE i.status = 'issued') b WHERE b.bal > 0`,
     ),
     db.query<{ status: string; n: string; v: string | null }>(
       "SELECT status, count(*) AS n, sum(total) AS v FROM sales WHERE status <> 'cancelled' GROUP BY status",
@@ -88,8 +88,8 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
     // Where every non-cancelled invoice stands right now.
     db.queryOne<{ draft: string; unpaid: string; partial: string; overdue: string; paid: string }>(
       `SELECT count(*) FILTER (WHERE b.status = 'draft') AS draft,
-              count(*) FILTER (WHERE b.status = 'issued' AND b.bal > 0 AND b.paid = 0 AND b.due_date >= ${TODAY}) AS unpaid,
-              count(*) FILTER (WHERE b.status = 'issued' AND b.bal > 0 AND b.paid > 0 AND b.due_date >= ${TODAY}) AS partial,
+              count(*) FILTER (WHERE b.status = 'issued' AND b.bal > 0 AND b.paid = 0 AND (b.due_date IS NULL OR b.due_date >= ${TODAY})) AS unpaid,
+              count(*) FILTER (WHERE b.status = 'issued' AND b.bal > 0 AND b.paid > 0 AND (b.due_date IS NULL OR b.due_date >= ${TODAY})) AS partial,
               count(*) FILTER (WHERE b.status = 'issued' AND b.bal > 0 AND b.due_date < ${TODAY}) AS overdue,
               count(*) FILTER (WHERE b.status = 'issued' AND b.bal <= 0) AS paid
        FROM (SELECT i.status, i.due_date, ${PAID("i")} AS paid, i.total - ${PAID("i")} AS bal FROM invoices i WHERE i.status IN ('draft','issued')) b`,
@@ -116,7 +116,7 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
     // How fast money arrives: allocated amounts weighted by days from invoice date to payment date, and the share paid by the due date.
     db.queryOne<{ days: string | null; on_time: string | null }>(
       `SELECT sum(a.amount * (p.payment_date - i.issue_date)) / NULLIF(sum(a.amount), 0) AS days,
-              sum(a.amount) FILTER (WHERE p.payment_date <= i.due_date) / NULLIF(sum(a.amount), 0) AS on_time
+              sum(a.amount) FILTER (WHERE i.due_date IS NULL OR p.payment_date <= i.due_date) / NULLIF(sum(a.amount), 0) AS on_time
        FROM payment_allocations a JOIN payments p ON p.id = a.payment_id JOIN invoices i ON i.id = a.invoice_id
        WHERE a.reversed_at IS NULL AND p.voided_at IS NULL AND p.payment_date BETWEEN $1 AND $2`,
       [q.from, q.to],

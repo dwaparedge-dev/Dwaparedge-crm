@@ -3,6 +3,12 @@ import { z } from "zod";
 export const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 export const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
 
+/** The PAN is characters 3-12 of a valid GSTIN; "" when the GSTIN is not (yet) complete and valid. */
+export const panFromGstin = (gstin: string | null | undefined) => {
+  const g = (gstin ?? "").trim().toUpperCase();
+  return GSTIN_RE.test(g) ? g.slice(2, 12) : "";
+};
+
 /** Trims; turns "" into null. */
 const emptyToNull = (v: unknown) => (typeof v === "string" ? (v.trim() === "" ? null : v.trim()) : v);
 
@@ -21,6 +27,17 @@ export const optionalGstin = z.preprocess(
 export const optionalPan = z.preprocess(
   (v) => emptyToNull(typeof v === "string" ? v.toUpperCase() : v),
   z.string().regex(PAN_RE, "Enter a valid 10-character PAN").nullable().default(null),
+);
+
+export const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+export const optionalIfsc = z.preprocess(
+  (v) => emptyToNull(typeof v === "string" ? v.toUpperCase() : v),
+  z.string().regex(IFSC_RE, "Enter a valid 11-character IFSC").nullable().default(null),
+);
+/** Bank account numbers vary by country; accept letters and digits, spaces and dashes are dropped. */
+export const optionalAccountNo = z.preprocess(
+  (v) => emptyToNull(typeof v === "string" ? v.replace(/[\s-]/g, "").toUpperCase() : v),
+  z.string().regex(/^[A-Z0-9]{6,34}$/, "Enter a valid account number").nullable().default(null),
 );
 
 export const uuid = z.string().uuid();

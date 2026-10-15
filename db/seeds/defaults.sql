@@ -15,6 +15,11 @@ INSERT INTO field_options (table_name, column_name, option_key, option_value, so
   ('payments','method','upi','UPI',20,true),
   ('payments','method','cash','Cash',30,true),
   ('payments','method','cheque','Cheque',40,true),
-  ('payments','method','other','Other',50,true)
+  ('payments','method','other','Other',50,true),
+  ('client_documents','doc_type','gst_certificate','GST certificate',10,true),
+  ('client_documents','doc_type','pan_card','PAN card',20,true),
+  ('client_documents','doc_type','agreement','Agreement',30,true),
+  ('client_documents','doc_type','cancelled_cheque','Cancelled cheque',40,true),
+  ('client_documents','doc_type','other','Other',50,true)
 ON CONFLICT DO NOTHING;
 INSERT INTO company_settings (id) VALUES (1) ON CONFLICT DO NOTHING;

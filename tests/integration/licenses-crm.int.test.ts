@@ -153,3 +153,41 @@ describe("clients and sales", () => {
     expect((await getSale(ids[0]!)).items[0]!.unit_price).toBe("100.00");
   });
 });
+
+describe("client documents and bank details", () => {
+  it("stores bank details and brand names on a client", async () => {
+    const { getClient } = await import("@/features/clients/service");
+    const id = await makeClient(actor, { brandNames: "Aris, Apres", bankName: "HDFC Bank", bankAccountNo: "123456789012", bankIfsc: "hdfc0001234", bankBranch: "Rajkot" });
+    expect(await getClient(id)).toMatchObject({ brand_names: "Aris, Apres", bank_name: "HDFC Bank", bank_account_no: "123456789012", bank_ifsc: "HDFC0001234", bank_branch: "Rajkot" });
+  });
+
+  it("adds, lists (without the file), downloads, renames and removes a document", async () => {
+    const { addDocument, deleteDocument, getDocumentFile, listDocuments, readUpload, updateDocument } = await import("@/features/clients/documents");
+    const clientId = await makeClient(actor);
+    const upload = await readUpload(new File([Buffer.from("%PDF-1.4 test")], "gst.pdf"));
+    const id = await addDocument(clientId, { docName: "GST certificate", docType: "gst_certificate" }, upload, actor);
+
+    const [row] = await listDocuments(clientId);
+    expect(row).toMatchObject({ id, doc_name: "GST certificate", doc_type: "gst_certificate", file_name: "gst.pdf", mime_type: "application/pdf" });
+    expect(row).not.toHaveProperty("content");
+    expect((await getDocumentFile(clientId, id)).content.toString()).toBe("%PDF-1.4 test");
+
+    await updateDocument(clientId, id, { docName: "GST cert 2026", docType: "other" }, actor);
+    expect((await listDocuments(clientId))[0]).toMatchObject({ doc_name: "GST cert 2026", doc_type: "other" });
+
+    await deleteDocument(clientId, id, actor);
+    expect(await listDocuments(clientId)).toHaveLength(0);
+  });
+
+  it("refuses unsupported or oversized files, unknown types and other clients' documents", async () => {
+    const { addDocument, getDocumentFile, readUpload } = await import("@/features/clients/documents");
+    await expect(readUpload(new File(["x"], "run.exe"))).rejects.toThrow(/PDF, image/);
+    await expect(readUpload(new File([new Uint8Array(4 * 1024 * 1024 + 1)], "big.pdf"))).rejects.toThrow(/4 MB/);
+    const a = await makeClient(actor);
+    const b = await makeClient(actor);
+    const upload = await readUpload(new File(["x"], "a.png"));
+    await expect(addDocument(a, { docName: "Bad", docType: "no_such_type" }, upload, actor)).rejects.toThrow(/Unknown option/);
+    const id = await addDocument(a, { docName: "A", docType: "other" }, upload, actor);
+    await expect(getDocumentFile(b, id)).rejects.toThrow(/not found/i);
+  });
+});

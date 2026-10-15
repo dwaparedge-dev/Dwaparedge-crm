@@ -20,6 +20,14 @@ export type InvoiceInput = z.infer<typeof invoiceInputSchema>;
 
 export const cancelSchema = z.object({ reason: z.string({ error: "A reason is required" }).trim().min(3, "A reason is required").max(1000) });
 
+export const regenerateSchema = z.object({
+  reason: optionalText(500),
+  /** Omitted = keep the due date, null = "not specified", otherwise the new date. */
+  dueDate: z.preprocess((v) => (v === "" ? undefined : v), isoDate.nullable().optional()),
+  /** true = the invoice date becomes today (the invoice number keeps its original month). */
+  updateInvoiceDate: z.boolean().default(false),
+});
+
 export const listInvoicesSchema = pageParams.extend({
   clientId: uuid.optional(),
   saleId: uuid.optional(),

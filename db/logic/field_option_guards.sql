@@ -21,3 +21,5 @@ DROP TRIGGER IF EXISTS payments_option_method ON payments;
 CREATE TRIGGER payments_option_method BEFORE INSERT OR UPDATE OF method ON payments FOR EACH ROW EXECUTE FUNCTION check_field_option('method');
 DROP TRIGGER IF EXISTS licenses_option_plan ON licenses;
 CREATE TRIGGER licenses_option_plan BEFORE INSERT OR UPDATE OF plan ON licenses FOR EACH ROW EXECUTE FUNCTION check_field_option('plan');
+DROP TRIGGER IF EXISTS client_documents_option_doc_type ON client_documents;
+CREATE TRIGGER client_documents_option_doc_type BEFORE INSERT OR UPDATE OF doc_type ON client_documents FOR EACH ROW EXECUTE FUNCTION check_field_option('doc_type');

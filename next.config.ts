@@ -25,8 +25,15 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   serverExternalPackages: ["pdfkit", "pg"],
-  // The invoice PDF reads its fonts from disk at runtime, which the file tracer cannot see on its own.
-  outputFileTracingIncludes: { "/api/invoices/\\[id\\]/pdf": ["./src/assets/fonts/*.ttf"] },
+  // The invoice PDF reads its fonts and the signature from disk at runtime, which the file tracer cannot see on its own.
+  // Issuing and regenerating an invoice draw it too (they store the document), so they need the files as well.
+  outputFileTracingIncludes: {
+    ...Object.fromEntries(
+      ["pdf", "issue", "regenerate"].map((r) => [`/api/invoices/\\[id\\]/${r}`, ["./src/assets/fonts/*.ttf", "./src/assets/signature.png"]]),
+    ),
+    // The payment receipt is set in standard fonts but carries the same signature.
+    "/api/payments/\\[id\\]/receipt": ["./src/assets/signature.png"],
+  },
   poweredByHeader: false,
   async headers() {
     return [

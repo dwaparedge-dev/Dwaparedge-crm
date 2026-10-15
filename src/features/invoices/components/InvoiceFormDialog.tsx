@@ -11,7 +11,7 @@ type Detail = InvoiceRow & { items: InvoiceItemRow[] };
 type SaleDetail = SaleRow & { items: SaleItemRow[]; milestones: MilestoneRow[] };
 
 const toForm = (i: Detail): InvoiceFormValues => ({
-  saleId: i.sale_id, issueDate: i.issue_date, dueDate: i.due_date, placeOfSupplyStateCode: i.place_of_supply_state_code ?? "",
+  saleId: i.sale_id, issueDate: i.issue_date, dueDate: i.due_date ?? "", placeOfSupplyStateCode: i.place_of_supply_state_code ?? "",
   paymentTerms: i.payment_terms ?? "", notes: i.notes ?? "",
   items: i.items.map((x) => ({
     saleItemId: x.sale_item_id, productId: x.product_id ?? "", description: x.description, hsnSac: x.hsn_sac ?? "", quantity: String(Number(x.quantity)), unitPrice: x.unit_price,

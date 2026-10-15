@@ -75,7 +75,7 @@ export function InvoiceLinesEditor({ control, register, errors, saleItems, ownTa
                 <TextField label="Description" required fullWidth {...register(`items.${idx}.description`, { required: "Description is required" })} error={Boolean(e?.description)} helperText={e?.description?.message} />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <TextField label="HSN / SAC" fullWidth {...register(`items.${idx}.hsnSac`)} />
+                <TextField label="HSN / SAC" fullWidth {...register(`items.${idx}.hsnSac`)} slotProps={{ input: { readOnly: true } }} helperText="Taken from the sale" />
               </Grid>
               <Grid size={{ xs: 6, md: 2 }}><TextField label="Qty" fullWidth inputMode="decimal" {...register(`items.${idx}.quantity`, { required: "Required", ...num })} error={Boolean(e?.quantity)} helperText={e?.quantity?.message} /></Grid>
               <Grid size={{ xs: 6, md: 3 }}><TextField label="Unit price (₹)" fullWidth inputMode="decimal" {...register(`items.${idx}.unitPrice`, { required: "Required", ...num })} error={Boolean(e?.unitPrice)} helperText={e?.unitPrice?.message} /></Grid>

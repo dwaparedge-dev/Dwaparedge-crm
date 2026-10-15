@@ -25,6 +25,11 @@ export interface ClientRow {
   owner_id: string | null;
   owner_name: string | null;
   notes: string | null;
+  brand_names: string | null;
+  bank_name: string | null;
+  bank_account_no: string | null;
+  bank_ifsc: string | null;
+  bank_branch: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -45,7 +50,7 @@ export async function listClients(p: ListClientsParams) {
   if (p.ownerId) where.push(`c.owner_id = ${add(p.ownerId)}`);
   if (p.search) {
     const s = add(likePattern(p.search));
-    where.push(`(c.code ILIKE ${s} OR c.legal_name ILIKE ${s} OR c.display_name ILIKE ${s} OR c.gstin ILIKE ${s} OR c.pan ILIKE ${s} OR c.email ILIKE ${s} OR c.phone ILIKE ${s} OR c.city ILIKE ${s})`);
+    where.push(`(c.code ILIKE ${s} OR c.legal_name ILIKE ${s} OR c.display_name ILIKE ${s} OR c.brand_names ILIKE ${s} OR c.gstin ILIKE ${s} OR c.pan ILIKE ${s} OR c.email ILIKE ${s} OR c.phone ILIKE ${s} OR c.city ILIKE ${s})`);
   }
   const order = `${SORT_COLUMNS[p.sort]} ${p.dir === "desc" ? "DESC" : "ASC"}, c.id`;
   const limit = add(p.pageSize);
@@ -129,11 +134,13 @@ async function assertNoConflict(input: ClientInput, excludeId: string | null, co
 const COLUMNS = [
   "legal_name", "display_name", "gstin", "pan", "email", "phone", "billing_address", "shipping_address",
   "city", "state_code", "postal_code", "country", "owner_id", "notes",
+  "brand_names", "bank_name", "bank_account_no", "bank_ifsc", "bank_branch",
 ] as const;
 
 const toParams = (i: ClientInput) => [
   i.legalName, i.displayName, i.gstin, i.pan, i.email, i.phone, i.billingAddress, i.shippingAddress,
   i.city, i.stateCode, i.postalCode, i.country, i.ownerId, i.notes,
+  i.brandNames, i.bankName, i.bankAccountNo, i.bankIfsc, i.bankBranch,
 ];
 
 export async function createClient(input: ClientInput, actorId: string, confirmDuplicate = false) {

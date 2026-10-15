@@ -2,7 +2,7 @@ import "server-only";
 import { amountInWordsINR } from "@/lib/words";
 import type { CompanySettings } from "@/features/settings/service";
 import type { AllocationRow, PaymentRow } from "@/features/payments/service";
-import { COLORS, dmy, joinLines, money, newDoc, toBuffer, watermark } from "./common";
+import { COLORS, dmy, joinLines, money, newDoc, signatureImage, toBuffer, watermark } from "./common";
 
 const L = 36;
 const W = 523;
@@ -57,6 +57,8 @@ export async function buildReceiptPdf(args: { payment: PaymentRow; allocations: 
     doc.font("Helvetica").fontSize(9).fillColor(COLORS.ink).text(p.notes, L, y + 28, { width: W });
   }
   doc.font("Helvetica").fontSize(8.5).fillColor(COLORS.ink).text(`For ${c.trade_name || c.legal_name}`, L + W - 200, 640, { width: 200, align: "right" });
+  const sign = signatureImage();
+  if (sign) doc.image(sign, L + W - 150, 648, { fit: [110, 43], valign: "bottom" }); // rests on the signing line below
   doc.moveTo(L + W - 160, 688).lineTo(L + W, 688).strokeColor(COLORS.muted).lineWidth(0.6).stroke();
   doc.fontSize(8).fillColor(COLORS.muted).text(c.signatory_name ? `${c.signatory_name} - Authorised Signatory` : "Authorised Signatory", L + W - 200, 692, { width: 200, align: "right" });
 

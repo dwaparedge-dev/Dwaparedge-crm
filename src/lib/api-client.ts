@@ -12,12 +12,14 @@ export class ApiError extends Error {
 export async function api<T = unknown>(url: string, init?: Omit<RequestInit, "body"> & { body?: unknown }): Promise<T> {
   const method = init?.method ?? "GET";
   const hasBody = method !== "GET";
+  const isForm = typeof FormData !== "undefined" && init?.body instanceof FormData;
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
-      headers: hasBody ? { "Content-Type": "application/json", ...init?.headers } : init?.headers,
-      body: hasBody ? JSON.stringify(init?.body ?? {}) : undefined,
+      // FormData (file uploads) sets its own multipart Content-Type, with the boundary.
+      headers: hasBody && !isForm ? { "Content-Type": "application/json", ...init?.headers } : init?.headers,
+      body: !hasBody ? undefined : isForm ? (init!.body as FormData) : JSON.stringify(init?.body ?? {}),
     });
   } catch {
     throw new ApiError("Network error. Check your connection and try again.", 0);

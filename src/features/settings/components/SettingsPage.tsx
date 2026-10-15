@@ -21,6 +21,7 @@ import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
 import { ApiError, api } from "@/lib/api-client";
 import { INDIAN_STATES } from "@/lib/india";
+import { GSTIN_RE, PAN_RE, panFromGstin } from "@/lib/validation";
 import { OptionsManager } from "@/features/options/components/OptionsManager";
 import type { CompanySettings } from "../service";
 
@@ -42,7 +43,10 @@ const toValues = (s: CompanySettings): Values => ({
 
 function SettingsForm({ initial, onSaved }: { initial: Values; onSaved: () => void }) {
   const notify = useNotify();
-  const { register, handleSubmit, control, setError, formState: { errors, isSubmitting, isDirty } } = useForm<Values>({ defaultValues: initial });
+  const { register, handleSubmit, control, setError, setValue, formState: { errors, isSubmitting, isDirty } } = useForm<Values>({
+    // A GSTIN with no PAN saved yet gets its PAN filled in when the page opens.
+    defaultValues: { ...initial, pan: initial.pan || panFromGstin(initial.gstin) },
+  });
   const [formError, setFormError] = useState<string | null>(null);
   const f = (n: keyof Values) => ({ error: Boolean(errors[n]), helperText: errors[n]?.message as string | undefined });
 
@@ -82,8 +86,30 @@ function SettingsForm({ initial, onSaved }: { initial: Values; onSaved: () => vo
               )} />
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField label="Postal code" fullWidth {...register("postalCode")} {...f("postalCode")} /></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><TextField label="GSTIN" fullWidth slotProps={{ htmlInput: { maxLength: 15 } }} {...register("gstin")} {...f("gstin")} helperText={errors.gstin?.message ?? "Leave blank if unregistered: the document is then titled “Invoice”, not “Tax Invoice”"} /></Grid>
-            <Grid size={{ xs: 12, md: 6 }}><TextField label="PAN" fullWidth slotProps={{ htmlInput: { maxLength: 10 } }} {...register("pan")} {...f("pan")} /></Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              {/* Controlled (not register) so the label always follows the value, including a value filled in by code. */}
+              <Controller name="gstin" control={control} rules={{ validate: (v) => !v || GSTIN_RE.test(v.toUpperCase()) || "Enter a valid 15-character GSTIN" }} render={({ field }) => (
+                <TextField
+                  {...field} label="GSTIN" fullWidth slotProps={{ htmlInput: { maxLength: 15, style: { textTransform: "uppercase" } } }}
+                  onChange={(e) => {
+                    const gstin = e.target.value.toUpperCase();
+                    field.onChange(gstin);
+                    const pan = panFromGstin(gstin);
+                    if (pan) setValue("pan", pan, { shouldValidate: true, shouldDirty: true });
+                  }}
+                  {...f("gstin")} helperText={errors.gstin?.message ?? "Leave blank if unregistered: the document is then titled “Invoice”, not “Tax Invoice”"}
+                />
+              )} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Controller name="pan" control={control} rules={{ validate: (v) => !v || PAN_RE.test(v.toUpperCase()) || "Enter a valid 10-character PAN" }} render={({ field }) => (
+                <TextField
+                  {...field} label="PAN" fullWidth slotProps={{ htmlInput: { maxLength: 10, style: { textTransform: "uppercase" } } }}
+                  onChange={(e) => field.onChange(e.target.value.toUpperCase())}
+                  {...f("pan")} helperText={errors.pan?.message ?? "Filled in from the GSTIN"}
+                />
+              )} />
+            </Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField label="Email" fullWidth {...register("email")} {...f("email")} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField label="Phone" fullWidth {...register("phone")} {...f("phone")} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField label="Website" fullWidth {...register("website")} {...f("website")} /></Grid>

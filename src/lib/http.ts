@@ -23,15 +23,16 @@ export function errorResponse(error: unknown) {
   return NextResponse.json({ error: { code: "INTERNAL", message: "Something went wrong" } }, { status: 500 });
 }
 
-/** CSRF defence for cookie-authenticated mutations: require same-origin + JSON body. */
-export function assertSameOrigin(request: Request) {
+/** CSRF defence for cookie-authenticated mutations: require same-origin + JSON body (`multipart` for file uploads). */
+export function assertSameOrigin(request: Request, opts: { multipart?: boolean } = {}) {
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
   if (!origin || !host || new URL(origin).host !== host) {
     throw new AppError("Cross-origin request blocked", 403, "CSRF");
   }
-  if (!request.headers.get("content-type")?.includes("application/json")) {
-    throw new AppError("Content-Type must be application/json", 415, "UNSUPPORTED_MEDIA_TYPE");
+  const wanted = opts.multipart ? "multipart/form-data" : "application/json";
+  if (!request.headers.get("content-type")?.includes(wanted)) {
+    throw new AppError(`Content-Type must be ${wanted}`, 415, "UNSUPPORTED_MEDIA_TYPE");
   }
 }
 

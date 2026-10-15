@@ -75,7 +75,7 @@ export function InvoicesList({ clientId, saleId, openNew = false, newSaleId, new
       renderCell: ({ row: i }) => <Link href={`/sales/${i.sale_id}`} onClick={(e) => e.stopPropagation()}>{i.sale_number}</Link>,
     } as GridColDef<InvoiceRow>]),
     { field: "issue_date", headerName: "Date", width: 120, valueFormatter: (v: string) => format(new Date(v), "dd MMM yyyy") },
-    { field: "due_date", headerName: "Due", width: 120, valueFormatter: (v: string) => format(new Date(v), "dd MMM yyyy") },
+    { field: "due_date", headerName: "Due", width: 120, valueFormatter: (v: string | null) => (v ? format(new Date(v), "dd MMM yyyy") : "Not specified") },
     { field: "total", headerName: "Total", width: 120, align: "right", headerAlign: "right", valueFormatter: (v: string) => formatMoney(v) },
     { field: "amount_paid", headerName: "Paid", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.amount_paid) : "—") },
     { field: "balance_due", headerName: "Balance", width: 120, align: "right", headerAlign: "right", valueFormatter: (_v, r) => (r.status === "issued" ? formatMoney(r.balance_due) : "—") },

@@ -1,7 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BusinessIcon from "@mui/icons-material/BusinessOutlined";
@@ -15,6 +17,8 @@ import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrashOutlined";
 import VerifiedIcon from "@mui/icons-material/VerifiedOutlined";
 import { format } from "date-fns";
+import Link from "@mui/material/Link";
+import Typography from "@mui/material/Typography";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { InfoBox, SectionLabel } from "@/components/common/InfoBox";
 import { useNotify } from "@/components/common/Notify";
@@ -22,12 +26,14 @@ import { HeroActions } from "@/components/common/HeroActions";
 import { useFetch } from "@/components/common/useFetch";
 import { DetailTabPanel, DetailViewHeroSidebar, DetailViewLayout, DetailViewMetricStrip, DetailViewTabs, MasterStatusBadge } from "@/components/shared/DetailView";
 import { api } from "@/lib/api-client";
+import { OptionLabel } from "@/features/options/components/OptionSelect";
 import { formatMoney } from "@/lib/format";
 import { stateNameByCode } from "@/lib/india";
 import { InvoicesList } from "@/features/invoices/components/InvoicesList";
 import { LicensesList } from "@/features/licenses/components/LicensesList";
 import { PaymentsList } from "@/features/payments/components/PaymentsList";
 import { SalesList } from "@/features/sales/components/SalesList";
+import type { ClientDocumentRow } from "../documents";
 import type { ClientRow } from "../service";
 import { ActivityTab } from "./ActivityTab";
 import { ClientFormDialog } from "./ClientFormDialog";
@@ -42,6 +48,7 @@ export function ClientDetail({ id }: { id: string }) {
   const router = useRouter();
   const notify = useNotify();
   const { data: c, error, loading, reload } = useFetch<ClientRow>(`/api/clients/${id}`);
+  const docs = useFetch<{ items: ClientDocumentRow[] }>(`/api/clients/${id}/documents`);
   const sales = useFetch<SalesSummary>(`/api/sales?clientId=${id}&pageSize=1`);
   const [tab, setTab] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -135,6 +142,15 @@ export function ClientDetail({ id }: { id: string }) {
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Client code">{c.code}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Legal name">{c.legal_name}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="Account owner">{c.owner_name}</InfoBox></Grid>
+                  <Grid size={12}>
+                    <InfoBox label="Brand names">
+                      {c.brand_names && (
+                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 0.5 }}>
+                          {c.brand_names.split(",").map((b) => <Chip key={b} label={b.trim()} size="small" />)}
+                        </Box>
+                      )}
+                    </InfoBox>
+                  </Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="GSTIN">{c.gstin}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="PAN">{c.pan}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><InfoBox label="State">{state}</InfoBox></Grid>
@@ -148,6 +164,27 @@ export function ClientDetail({ id }: { id: string }) {
                   <Grid size={{ xs: 12, md: 6 }}><InfoBox label="City">{c.city}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 3 }}><InfoBox label="Postal code">{c.postal_code}</InfoBox></Grid>
                   <Grid size={{ xs: 12, md: 3 }}><InfoBox label="Country">{c.country}</InfoBox></Grid>
+                </Grid>
+                <SectionLabel>Bank details</SectionLabel>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Bank name">{c.bank_name}</InfoBox></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Branch">{c.bank_branch}</InfoBox></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><InfoBox label="Account number">{c.bank_account_no}</InfoBox></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><InfoBox label="IFSC">{c.bank_ifsc}</InfoBox></Grid>
+                </Grid>
+                <SectionLabel>Documents</SectionLabel>
+                <Grid container spacing={2}>
+                  {(docs.data?.items ?? []).map((d) => (
+                    <Grid size={{ xs: 12, md: 4 }} key={d.id}>
+                      <InfoBox label={d.doc_name}>
+                        <Link href={`/api/clients/${id}/documents/${d.id}`} target="_blank" rel="noopener" underline="hover">{d.file_name}</Link>
+                        <Typography variant="caption" color="text.secondary" component="div" sx={{ fontWeight: 500 }}>
+                          <OptionLabel table="client_documents" column="doc_type" value={d.doc_type} />
+                        </Typography>
+                      </InfoBox>
+                    </Grid>
+                  ))}
+                  {docs.data?.items.length === 0 && <Grid size={12}><InfoBox label="Documents">{null}</InfoBox></Grid>}
                 </Grid>
                 <SectionLabel>Notes and history</SectionLabel>
                 <Grid container spacing={2}>
@@ -178,7 +215,7 @@ export function ClientDetail({ id }: { id: string }) {
         onConfirm={toggleArchive}
         onClose={() => setConfirm(false)}
       />
-      {editing && <ClientFormDialog clientId={id} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
+      {editing && <ClientFormDialog clientId={id} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); docs.reload(); }} />}
     </>
   );
 }
