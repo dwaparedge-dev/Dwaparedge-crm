@@ -269,4 +269,38 @@ describe("regenerating an issued invoice", () => {
     await regenerateInvoice(id, null, actor);
     expect((await getInvoice(id)).items[0]!.hsn_sac).toBe("997331");
   });
+
+  it("keeps the instalment's deliverables text and milestone when the sale no longer has them", async () => {
+    const { db } = await import("@/lib/db");
+    const { replaceMilestones, getSale } = await import("@/features/sales/service");
+    const { milestonesSchema } = await import("@/features/sales/schema");
+    const { issueInvoice, regenerateInvoice, getInvoice } = await import("@/features/invoices/service");
+    const saleId = await confirmedSale(actor, intra, [LINE("10000", "18")]);
+    await replaceMilestones(saleId, milestonesSchema.parse({ milestones: [
+      { title: "Kickoff", basis: "percent", percent: "30", description: "Discovery workshops" },
+      { title: "Go-live", basis: "percent", percent: "70" },
+    ] }).milestones, actor);
+    const milestoneId = (await getSale(saleId)).milestones[0]!.id;
+    const id = await bill(actor, saleId, { mode: "milestone", milestoneId });
+    await issueInvoice(id, actor);
+
+    // Text edited on the sale: the new text is used.
+    await db.query("UPDATE sale_milestones SET description = 'Workshops and sign-off' WHERE id = $1", [milestoneId]);
+    await regenerateInvoice(id, null, actor);
+    expect((await getInvoice(id)).document_snapshot!.milestone).toMatchObject({ title: "Kickoff", description: "Workshops and sign-off" });
+
+    // Text cleared on the sale: the invoice keeps what it had, and the version says so.
+    await db.query("UPDATE sale_milestones SET description = NULL WHERE id = $1", [milestoneId]);
+    await regenerateInvoice(id, null, actor);
+    let inv = await getInvoice(id);
+    expect(inv.document_snapshot!.milestone).toMatchObject({ title: "Kickoff", description: "Workshops and sign-off" });
+    expect(inv.versions[0]!.reason).toMatch(/deliverables text is empty on the sale/);
+
+    // Instalment no longer linked to the invoice: the milestone stays on the invoice.
+    await db.query("UPDATE sale_milestones SET invoice_id = NULL WHERE id = $1", [milestoneId]);
+    await regenerateInvoice(id, null, actor);
+    inv = await getInvoice(id);
+    expect(inv.document_snapshot!.milestone).toMatchObject({ position: 1, title: "Kickoff", description: "Workshops and sign-off" });
+    expect(inv.versions[0]!.reason).toMatch(/no longer linked/);
+  });
 });

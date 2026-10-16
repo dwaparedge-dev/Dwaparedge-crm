@@ -604,11 +604,21 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
     }
     const inv = await loadInvoice(id, tx);
     const client = await loadClient(tx, inv.client_id);
-    const snap: VersionSnapshots = {
-      client: snapshotClient(client),
-      company: snapshotCompany(settings),
-      document: await buildDocumentSnapshot(id, inv.sale_id, inv.subtotal, tx, inv.issued_at),
-    };
+    let document = await buildDocumentSnapshot(id, inv.sale_id, inv.subtotal, tx, inv.issued_at);
+    // The project details are read from the sale again, but a regenerated invoice never loses what the one it replaces
+    // already printed: if the sale no longer links the instalment, or its deliverables text has been cleared, keep the old.
+    const previous = (await tx.query<{ document_snapshot: DocumentSnapshot | null }>(
+      `SELECT COALESCE((SELECT v.document_snapshot FROM invoice_versions v WHERE v.invoice_id = i.id ORDER BY v.version_no DESC LIMIT 1), i.document_snapshot) AS document_snapshot
+       FROM invoices i WHERE i.id = $1`, [id],
+    )).rows[0]?.document_snapshot?.milestone;
+    if (previous && !document.milestone) {
+      document = { ...document, milestone: previous };
+      notes.push(`Instalment "${previous.title}" is no longer linked to this invoice on the sale; its details were kept from the previous version`);
+    } else if (previous?.description && document.milestone && !document.milestone.description) {
+      document = { ...document, milestone: { ...document.milestone, description: previous.description } };
+      notes.push("The instalment's deliverables text is empty on the sale; the previous text was kept");
+    }
+    const snap: VersionSnapshots = { client: snapshotClient(client), company: snapshotCompany(settings), document };
     const last = (await tx.query<{ n: number }>("SELECT max(version_no) AS n FROM invoice_versions WHERE invoice_id = $1", [id])).rows[0]?.n ?? 1;
     const version = last + 1;
 

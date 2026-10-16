@@ -19,8 +19,8 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/clients/[id]/do
 /** multipart/form-data: file, docName, docType. */
 export async function POST(request: Request, ctx: RouteContext<"/api/clients/[id]/documents">) {
   try {
+    const user = await requireUser(); // signed-in check first, so an anonymous caller always gets 401
     assertSameOrigin(request, { multipart: true });
-    const user = await requireUser();
     const id = uuid.parse((await ctx.params).id);
     const form = await request.formData().catch(() => {
       throw new AppError("Request body must be a valid form upload", 400, "BAD_REQUEST");
