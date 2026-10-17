@@ -303,4 +303,39 @@ describe("regenerating an issued invoice", () => {
     expect(inv.document_snapshot!.milestone).toMatchObject({ position: 1, title: "Kickoff", description: "Workshops and sign-off" });
     expect(inv.versions[0]!.reason).toMatch(/no longer linked/);
   });
+
+  it("takes the line wording from the sale when regenerating, keeping the instalment ending", async () => {
+    const { db } = await import("@/lib/db");
+    const { replaceMilestones, getSale } = await import("@/features/sales/service");
+    const { milestonesSchema } = await import("@/features/sales/schema");
+    const { issueInvoice, regenerateInvoice, getInvoice } = await import("@/features/invoices/service");
+    const saleId = await confirmedSale(actor, intra, [{ ...LINE("10000", "18"), description: "old wording" }]);
+    await replaceMilestones(saleId, milestonesSchema.parse({ milestones: [
+      { title: "Kickoff", basis: "percent", percent: "30" },
+      { title: "Go-live", basis: "percent", percent: "70" },
+    ] }).milestones, actor);
+    const id = await bill(actor, saleId, { mode: "milestone", milestoneId: (await getSale(saleId)).milestones[0]!.id });
+    await issueInvoice(id, actor);
+    expect((await getInvoice(id)).items[0]!.description).toBe("old wording (Kickoff)");
+
+    await db.query("UPDATE sale_items SET description = 'New wording' WHERE sale_id = $1", [saleId]);
+    expect((await getInvoice(id)).items[0]!.description).toBe("old wording (Kickoff)"); // issued lines never change on their own
+    await regenerateInvoice(id, null, actor);
+    const inv = await getInvoice(id);
+    expect(inv.items[0]!.description).toBe("New wording (Kickoff)");
+    expect(inv.versions[0]!.reason).toBe("Item descriptions updated from the sale");
+    expect((await db.query<{ description: string }>("SELECT description FROM invoice_items WHERE invoice_id = $1", [id]))[0]!.description).toBe("old wording (Kickoff)");
+
+    // Nothing changed on the sale: nothing is reported.
+    await regenerateInvoice(id, null, actor);
+    expect((await getInvoice(id)).versions[0]!.reason).toBeNull();
+
+    // The repair listing finds an invoice only while the sale reads differently from it.
+    const { invoicesWithStaleDescriptions } = await import("@/features/invoices/service");
+    expect((await invoicesWithStaleDescriptions()).find((x) => x.id === id)).toBeUndefined();
+    await db.query("UPDATE sale_items SET description = 'Reworded again' WHERE sale_id = $1", [saleId]);
+    expect((await invoicesWithStaleDescriptions()).find((x) => x.id === id)?.changes).toEqual([{ from: "New wording (Kickoff)", to: "Reworded again (Kickoff)" }]);
+    await regenerateInvoice(id, null, actor);
+    expect((await invoicesWithStaleDescriptions()).find((x) => x.id === id)).toBeUndefined();
+  });
 });

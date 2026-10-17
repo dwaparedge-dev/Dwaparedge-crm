@@ -95,6 +95,7 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `npm run db:migrate` | Apply new numbered `db/migrations/*.sql` (one-off drops, renames, data fixes), each in a transaction |
 | `npm run db:seed-admin` | Create the first user from `SEED_ADMIN_*` (no-op if the email exists) |
 | `npm run users -- <command>` | `list`, `create`, `passwd`, `deactivate`, `activate` (passwords typed at a hidden prompt) |
+| `npm run invoices:refresh` | Dry run: lists issued invoices whose line wording no longer matches their sale. Add `-- --apply` to regenerate them (earlier versions are kept) |
 
 ### Staff accounts
 

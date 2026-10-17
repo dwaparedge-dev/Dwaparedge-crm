@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBillingStatement, milestoneTaxable, planShares, type BillableItem } from "@/lib/billing";
+import { buildBillingStatement, lineDescriptionFromSale, milestoneTaxable, planShares, type BillableItem } from "@/lib/billing";
 import { formatScaled, parseScaled } from "@/lib/money";
 
 const item = (id: string, taxable: string, remaining = taxable): BillableItem => ({ id, taxable, remaining });
@@ -103,5 +103,20 @@ describe("buildBillingStatement", () => {
     const s = buildBillingStatement({ contractValue: "0.00", billedBefore: "0.00", thisInvoice: "0.00", milestones: [], currentMilestoneId: null });
     expect(s.scheduleShare).toBe("0.00");
     expect(s.balanceToBill).toBe("0.00");
+  });
+});
+
+describe("lineDescriptionFromSale", () => {
+  it("uses the sale's wording as it is now", () => {
+    expect(lineDescriptionFromSale("factoone-jobwork", "Facto-ONE Job Work Edition")).toBe("Facto-ONE Job Work Edition");
+  });
+  it("keeps the instalment, balance, part-payment or percentage ending of a part-billed line", () => {
+    expect(lineDescriptionFromSale("Factoone (Project Initiation & Advance)", "FactoONE", "Project Initiation & Advance")).toBe("FactoONE (Project Initiation & Advance)");
+    expect(lineDescriptionFromSale("Old name (Balance)", "New name")).toBe("New name (Balance)");
+    expect(lineDescriptionFromSale("Old name (Part payment)", "New name")).toBe("New name (Part payment)");
+    expect(lineDescriptionFromSale("Old name (12.5%)", "New name")).toBe("New name (12.5%)");
+  });
+  it("does not mistake a bracket that belongs to the wording for an ending", () => {
+    expect(lineDescriptionFromSale("Hosting (annual)", "Hosting (yearly)")).toBe("Hosting (yearly)");
   });
 });

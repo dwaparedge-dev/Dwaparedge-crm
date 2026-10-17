@@ -9,7 +9,7 @@ import { computeInvoiceLine, summarizeInvoice, supplyType, type InvoiceLineAmoun
 import { todayIST } from "@/lib/dates";
 import { ensureClientCode, nextSequence } from "@/lib/sequences";
 import { invoiceNumber, monthScope } from "@/lib/numbering";
-import { buildBillingStatement, planShares, type BillMode, type DocumentSnapshot } from "@/lib/billing";
+import { buildBillingStatement, lineDescriptionFromSale, planShares, type BillMode, type DocumentSnapshot } from "@/lib/billing";
 import { formatScaled, parseScaled } from "@/lib/money";
 import { likePattern } from "@/lib/validation";
 import { stateNameByCode } from "@/lib/india";
@@ -142,6 +142,13 @@ async function saleCodes(saleItemIds: string[], runner?: PoolClient): Promise<Ma
   return new Map(rows.filter((r) => r.hsn_sac).map((r) => [r.id, r.hsn_sac!]));
 }
 
+/** The wording of each sale item as the sale has it now. */
+async function saleDescriptions(saleItemIds: string[], runner?: PoolClient): Promise<Map<string, string>> {
+  if (!saleItemIds.length) return new Map();
+  const rows = await db.query<{ id: string; description: string }>("SELECT id, btrim(description) AS description FROM sale_items WHERE id = ANY($1::uuid[])", [saleItemIds], runner);
+  return new Map(rows.filter((r) => r.description).map((r) => [r.id, r.description]));
+}
+
 async function loadInvoice(id: string, runner?: PoolClient) {
   const inv = await db.queryOne<InvoiceRow>(`${SELECT} WHERE i.id = $1`, [id], runner);
   if (!inv) throw new AppError("Invoice not found", 404, "NOT_FOUND");
@@ -179,11 +186,14 @@ export async function getInvoice(id: string, runner?: PoolClient) {
     versions.push({ version_no: 1, reason: null, created_at: base.issued_at ?? base.created_at, created_by_name: issuer?.name ?? null, is_current: current === 1 });
   }
   const latest = stored[0]
-    ? await db.queryOne<{ client_snapshot: ClientSnapshot; company_snapshot: CompanySnapshot; document_snapshot: DocumentSnapshot | null; item_codes: Record<string, string | null> | null }>(
-        "SELECT client_snapshot, company_snapshot, document_snapshot, item_codes FROM invoice_versions WHERE invoice_id = $1 AND version_no = $2", [id, current], runner)
+    ? await db.queryOne<{
+        client_snapshot: ClientSnapshot; company_snapshot: CompanySnapshot; document_snapshot: DocumentSnapshot | null;
+        item_codes: Record<string, string | null> | null; item_descriptions: Record<string, string> | null;
+      }>(
+        "SELECT client_snapshot, company_snapshot, document_snapshot, item_codes, item_descriptions FROM invoice_versions WHERE invoice_id = $1 AND version_no = $2", [id, current], runner)
     : null;
-  const { item_codes: itemCodes, ...snapshots } = latest ?? { item_codes: null };
-  const items = itemCodes ? base.items.map((i) => ({ ...i, hsn_sac: itemCodes[i.id] ?? i.hsn_sac })) : base.items;
+  const { item_codes: itemCodes, item_descriptions: itemDescriptions, ...snapshots } = latest ?? { item_codes: null, item_descriptions: null };
+  const items = base.items.map((i) => ({ ...i, hsn_sac: itemCodes?.[i.id] ?? i.hsn_sac, description: itemDescriptions?.[i.id] ?? i.description }));
   return { ...base, ...snapshots, items, allocations, version: current, versions };
 }
 
@@ -537,16 +547,16 @@ type VersionSnapshots = { client: ClientSnapshot; company: CompanySnapshot; docu
 
 async function storeVersion(
   tx: PoolClient, inv: Awaited<ReturnType<typeof loadInvoice>>, versionNo: number, snap: VersionSnapshots,
-  meta: { reason: string | null; actorId: string | null; at?: string | null; itemCodes?: Record<string, string | null> | null },
+  meta: { reason: string | null; actorId: string | null; at?: string | null; itemCodes?: Record<string, string | null> | null; itemDescriptions?: Record<string, string> | null },
 ) {
   const { items, ...invoice } = inv;
-  const shown = meta.itemCodes ? items.map((i) => ({ ...i, hsn_sac: meta.itemCodes![i.id] ?? i.hsn_sac })) : items;
+  const shown = items.map((i) => ({ ...i, hsn_sac: meta.itemCodes?.[i.id] ?? i.hsn_sac, description: meta.itemDescriptions?.[i.id] ?? i.description }));
   const pdf = await buildInvoicePdf({ invoice, items: shown, company: snap.company, client: snap.client, document: snap.document });
   await tx.query(
-    `INSERT INTO invoice_versions (invoice_id, version_no, client_snapshot, company_snapshot, document_snapshot, item_codes, pdf, reason, created_by, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10::timestamptz, now()))`,
+    `INSERT INTO invoice_versions (invoice_id, version_no, client_snapshot, company_snapshot, document_snapshot, item_codes, item_descriptions, pdf, reason, created_by, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, COALESCE($11::timestamptz, now()))`,
     [inv.id, versionNo, JSON.stringify(snap.client), JSON.stringify(snap.company), snap.document ? JSON.stringify(snap.document) : null,
-      meta.itemCodes ? JSON.stringify(meta.itemCodes) : null, pdf, meta.reason, meta.actorId, meta.at ?? null],
+      meta.itemCodes ? JSON.stringify(meta.itemCodes) : null, meta.itemDescriptions ? JSON.stringify(meta.itemDescriptions) : null, pdf, meta.reason, meta.actorId, meta.at ?? null],
   );
 }
 
@@ -626,10 +636,21 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
     // so the codes for this version are kept with it.
     const fresh = await saleCodes(inv.items.map((i) => i.sale_item_id), tx);
     const itemCodes: Record<string, string | null> = Object.fromEntries(inv.items.map((i) => [i.id, fresh.get(i.sale_item_id) ?? i.hsn_sac]));
-    const prev = (await tx.query<{ item_codes: Record<string, string | null> | null }>("SELECT item_codes FROM invoice_versions WHERE invoice_id = $1 AND version_no = $2", [id, last])).rows[0]?.item_codes ?? {};
+    const prevRow = (await tx.query<{ item_codes: Record<string, string | null> | null; item_descriptions: Record<string, string> | null }>(
+      "SELECT item_codes, item_descriptions FROM invoice_versions WHERE invoice_id = $1 AND version_no = $2", [id, last])).rows[0];
+    const prev = prevRow?.item_codes ?? {};
     if (inv.items.some((i) => (prev[i.id] ?? i.hsn_sac ?? null) !== (itemCodes[i.id] ?? null))) notes.push("SAC/HSN codes updated from the sale");
+
+    // The wording of each line is read from the sale too (a line that bills part of a sale item keeps its " (instalment)" ending).
+    const saleWords = await saleDescriptions(inv.items.map((i) => i.sale_item_id), tx);
+    const itemDescriptions: Record<string, string> = Object.fromEntries(inv.items.map((i) => {
+      const word = saleWords.get(i.sale_item_id);
+      return [i.id, word ? lineDescriptionFromSale(i.description, word, document.milestone?.title) : i.description];
+    }));
+    const prevWords = prevRow?.item_descriptions ?? {};
+    if (inv.items.some((i) => (prevWords[i.id] ?? i.description) !== itemDescriptions[i.id])) notes.push("Item descriptions updated from the sale");
     const note = [...notes, reason].filter(Boolean).join(". ") || null;
-    await storeVersion(tx, inv, version, snap, { reason: note, actorId, itemCodes });
+    await storeVersion(tx, inv, version, snap, { reason: note, actorId, itemCodes, itemDescriptions });
     await logActivity({ entityType: "invoice", entityId: id, clientId: cur.client_id, action: "regenerated", summary: `Invoice ${cur.invoice_number} regenerated (version ${version})${note ? `: ${note}` : ""}`, actorId, metadata: { version, changes: notes } }, tx);
     return version;
   });
@@ -644,4 +665,32 @@ export async function getStoredInvoicePdf(id: string, version?: number) {
   );
   if (!row && version !== undefined && version !== 1) throw new AppError("That version of the invoice does not exist", 404, "NOT_FOUND");
   return row;
+}
+
+/**
+ * Issued invoices whose lines no longer read like the sale's lines (the sale was reworded after they were made or last
+ * regenerated), with what each line would become. Regenerating such an invoice brings it up to date.
+ */
+export async function invoicesWithStaleDescriptions() {
+  const invoices = await db.query<{ id: string; invoice_number: string; issued_by: string | null; milestone_title: string | null }>(
+    `SELECT i.id, i.invoice_number, i.issued_by,
+            COALESCE((SELECT v.document_snapshot FROM invoice_versions v WHERE v.invoice_id = i.id ORDER BY v.version_no DESC LIMIT 1), i.document_snapshot)->'milestone'->>'title' AS milestone_title
+     FROM invoices i WHERE i.status = 'issued' ORDER BY i.created_at`,
+  );
+  const out: { id: string; invoice_number: string; issued_by: string | null; changes: { from: string; to: string }[] }[] = [];
+  for (const inv of invoices) {
+    const latest = await db.queryOne<{ item_descriptions: Record<string, string> | null }>(
+      "SELECT item_descriptions FROM invoice_versions WHERE invoice_id = $1 ORDER BY version_no DESC LIMIT 1", [inv.id],
+    );
+    const lines = await db.query<{ id: string; description: string; sale_description: string | null }>(
+      "SELECT ii.id, ii.description, btrim(si.description) AS sale_description FROM invoice_items ii JOIN sale_items si ON si.id = ii.sale_item_id WHERE ii.invoice_id = $1 ORDER BY ii.position", [inv.id],
+    );
+    const changes = lines.flatMap((l) => {
+      const shown = latest?.item_descriptions?.[l.id] ?? l.description;
+      const wanted = l.sale_description ? lineDescriptionFromSale(shown, l.sale_description, inv.milestone_title) : shown;
+      return wanted !== shown ? [{ from: shown, to: wanted }] : [];
+    });
+    if (changes.length) out.push({ id: inv.id, invoice_number: inv.invoice_number, issued_by: inv.issued_by, changes });
+  }
+  return out;
 }

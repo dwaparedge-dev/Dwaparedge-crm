@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS invoice_versions (
   company_snapshot  JSONB       NOT NULL,   -- our details and bank details printed on this version
   document_snapshot JSONB,                  -- project references, milestone and billing schedule printed on this version
   item_codes        JSONB,                  -- {invoice_item_id: SAC/HSN} as read from the sale for this version; NULL = the codes on the lines
+  item_descriptions JSONB,                  -- {invoice_item_id: line wording} as read from the sale for this version; NULL = the wording on the lines
   pdf               BYTEA       NOT NULL,   -- the document exactly as generated then (later layout changes do not touch it)
   reason            TEXT,                   -- why it was regenerated
   created_by        UUID        REFERENCES users(id) ON DELETE SET NULL,

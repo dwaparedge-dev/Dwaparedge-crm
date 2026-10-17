@@ -140,3 +140,15 @@ export interface DocumentSnapshot {
   milestone: { position: number; title: string; description: string | null; share: string } | null;
   statement: BillingStatement;
 }
+
+/**
+ * An invoice line starts as the sale line's wording, plus " (<what it bills>)" when it bills only part of it: the
+ * instalment's title, "Balance", "Part payment" or a percentage. This returns the line as it reads when the sale's wording
+ * is `saleDescription` now, keeping whichever of those endings the line already has.
+ */
+export function lineDescriptionFromSale(currentLine: string, saleDescription: string, milestoneTitle?: string | null): string {
+  const ending = milestoneTitle && currentLine.endsWith(` (${milestoneTitle})`)
+    ? ` (${milestoneTitle})`
+    : currentLine.match(/ \((?:Balance|Part payment|\d+(?:\.\d+)?%)\)$/)?.[0] ?? "";
+  return `${saleDescription.trim()}${ending}`;
+}
