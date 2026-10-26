@@ -1,7 +1,7 @@
 export interface NavItem {
   label: string;
   href: string;
-  icon: "dashboard" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
+  icon: "dashboard" | "demoRequests" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
   ready: boolean;
 }
 
@@ -17,6 +17,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "Sales", dot: "#666CFF",
     items: [
+      { label: "Demo Requests", href: "/demo-requests", icon: "demoRequests", ready: true },
       { label: "Clients", href: "/clients", icon: "clients", ready: true },
       { label: "Products & Services", href: "/products", icon: "products", ready: true },
       { label: "Sales", href: "/sales", icon: "sales", ready: true },

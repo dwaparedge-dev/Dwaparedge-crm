@@ -1,12 +1,13 @@
 # Security notes
 
 ## How access is controlled
-- **Every page and API route needs a signed-in staff user.** `src/proxy.ts` redirects pages and answers `401` for the API as a first gate; each route handler then calls `requireUser()`, which re-reads the user row (active, token version). The only open endpoints are `POST /api/auth/login` and the manifest and icons.
+- **Every page and API route needs a signed-in staff user.** `src/proxy.ts` redirects pages and answers `401` for the API as a first gate; each route handler then calls `requireUser()`, which re-reads the user row (active, token version). The only endpoints reachable without a session are `POST /api/auth/login`, the manifest and icons, and `POST /api/intake/demo-requests`, which is closed to anyone without the shared `DEMO_INTAKE_KEY` (see below).
 - **Session:** a JWT (HS256, algorithm pinned) in an `httpOnly`, `SameSite=Lax`, `Secure` cookie. In production the cookie is named `__Host-de_session`, so a browser only accepts it from this exact host over HTTPS. Signing out, changing the password, or deactivating a user bumps `token_version`, which ends every session of that user at once.
 - **Idle sign-out:** a browser signs itself out after 30 minutes without activity (other devices are not affected). Set `JWT_EXPIRES_IN_DAYS=1` in production.
 - **Passwords:** bcrypt (12 rounds), 12 to 72 bytes, no common passwords, nothing built from your email name. Unknown emails cost the same time as known ones and the error never says which part was wrong.
 - **Brute force:** at most 5 failed sign-ins per email-and-address pair, 25 per email and 20 per address in 15 minutes, then `429` (a stranger cannot lock the real user out from another address). Password changes have the same kind of limit. The keys are salted hashes (`RATE_LIMIT_SALT`).
 - **Flooding:** the proxy limits each address per instance (300 reads, 90 writes, 30 auth calls a minute). Instances do not share memory, so also add the Vercel Firewall rule below.
+- **Demo-request intake:** the FactoOne server posts "Book a demo" submissions to `POST /api/intake/demo-requests`. The browser never talks to the CRM: the visitor's browser calls the FactoOne server, which adds `X-Intake-Key`, so the key is never in a web page and the CRM needs no CORS. The key (`DEMO_INTAKE_KEY`, 32+ characters, different in production) is compared in constant time before the body is read; unset means the route answers `503`. The route accepts only a small JSON body, validates every field, cannot set status or owner, and stores the visitor's address only as a salted hash. `src/proxy.ts` skips the cookie check for `/api/intake/*` only and still applies a flood limit; any new route under that path must call `requireIntakeKey()` itself.
 - **CSRF:** every state-changing request must be same-origin (Origin must match Host) and `application/json`.
 - **Injection:** every value goes to Postgres as a bound parameter. Sort columns come from fixed lists, and the only interpolated identifiers (dropdown options) come from a whitelist.
 - **Validation:** every input is checked with Zod (ids are UUIDs, pages are capped at 100 rows, text has length limits).
@@ -21,10 +22,10 @@
 - In Supabase, optionally also turn the Data API off: Project Settings → API (or Data API) → disable.
 
 ## Before going live
-1. Set strong, unique `JWT_SECRET` (`openssl rand -hex 48`) and `RATE_LIMIT_SALT` (`openssl rand -hex 16`) in Vercel, and `JWT_EXPIRES_IN_DAYS=1`. The app refuses to start in production without `RATE_LIMIT_SALT`.
+1. Set strong, unique `JWT_SECRET` (`openssl rand -hex 48`) and `RATE_LIMIT_SALT` (`openssl rand -hex 16`) in Vercel, and `JWT_EXPIRES_IN_DAYS=1`. To receive demo requests also set `DEMO_INTAKE_KEY` (`openssl rand -hex 32`, not the development value) and put the same value in the FactoOne server's environment. The app refuses to start in production without `RATE_LIMIT_SALT`.
 2. Run `npm run db:sync` against production (this also applies `db/hardening.sql`).
 3. Create the admin with `npm run db:seed-admin` using a long, unique password, then delete the `SEED_ADMIN_*` values from every `.env` file.
-4. In Vercel add a **rate-limit rule** (Firewall) for `/api/*` (for example 100 requests per minute per IP) and a stricter one for `/api/auth/*`.
+4. In Vercel add a **rate-limit rule** (Firewall) for `/api/*` (for example 100 requests per minute per IP) a stricter one for `/api/auth/*`, and one for `/api/intake/*` (for example 30 a minute per IP).
 5. Turn on Supabase backups and enable two-step sign-in on the Supabase, Vercel and GitHub accounts.
 6. Look at `npm run users -- events` now and then for repeated failures or sign-ins from places you don't recognise.
 

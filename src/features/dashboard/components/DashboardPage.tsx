@@ -152,6 +152,7 @@ export function DashboardPage() {
   }, [d]);
 
   const attention = d ? [
+    d.demoRequests.new > 0 && { tone: "info" as const, text: `${plural(d.demoRequests.new, "new demo request")}`, href: "/demo-requests?status=new" },
     d.billing.overdue.invoices > 0 && { tone: "error" as const, text: `${plural(d.billing.overdue.invoices, "overdue invoice")} · ${formatMoney(d.billing.overdue.amount)}`, href: "/invoices" },
     d.licenses.expired > 0 && { tone: "error" as const, text: `${plural(d.licenses.expired, "licence")} expired`, href: "/licenses" },
     d.licenses.expiring7 > 0 && { tone: "warning" as const, text: `${plural(d.licenses.expiring7, "licence")} expiring in 7 days`, href: "/licenses" },

@@ -47,6 +47,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   t("crm", "contacts", "People at a client"),
   t("crm", "client_documents", "Files uploaded against a client (GST certificate, agreements, ...)"),
   t("crm", "activity_log", "Shared activity / audit log"),
+  t("crm", "demo_requests", "Demo requests submitted from the FactoOne landing page"),
   t("catalog", "products", "Product and service catalog"),
   t("sales", "sales", "Sale orders"),
   t("sales", "sale_items", "Lines of a sale order"),

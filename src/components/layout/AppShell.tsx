@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Avatar from "@mui/material/Avatar";
+import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
@@ -23,6 +24,7 @@ import MenuIcon from "@mui/icons-material/Menu";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DashboardIcon from "@mui/icons-material/SpaceDashboardOutlined";
+import DemoRequestsIcon from "@mui/icons-material/ContactPhoneOutlined";
 import ClientsIcon from "@mui/icons-material/BusinessOutlined";
 import ProductsIcon from "@mui/icons-material/Inventory2Outlined";
 import SalesIcon from "@mui/icons-material/HandshakeOutlined";
@@ -38,12 +40,14 @@ import { NAV_GROUPS, type NavItem } from "./nav";
 import { useNotify } from "@/components/common/Notify";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PageSearch } from "./PageSearch";
+import { useNewDemoRequestCount } from "@/features/demo-requests/useNewDemoRequestCount";
 
 const FULL = 230;
 const MINI = 71;
 
 const ICONS: Record<NavItem["icon"], React.ReactNode> = {
   dashboard: <DashboardIcon />,
+  demoRequests: <DemoRequestsIcon />,
   clients: <ClientsIcon />,
   products: <ProductsIcon />,
   sales: <SalesIcon />,
@@ -64,6 +68,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
   const pathname = usePathname();
   const router = useRouter();
   const notify = useNotify();
+  const newDemoRequests = useNewDemoRequestCount();
 
   const mini = isDesktop && collapsed;
   const width = isDesktop ? (collapsed ? MINI : FULL) : 0;
@@ -116,7 +121,9 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
                     onClick={() => setMobileOpen(false)}
                     sx={{ borderRadius: 2, mb: 0.5, py: 1.1, justifyContent: mini ? "center" : "flex-start" }}
                   >
-                    <ListItemIcon sx={{ minWidth: mini ? 0 : 40 }}>{ICONS[item.icon]}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: mini ? 0 : 40 }}>
+                      {item.icon === "demoRequests" ? <Badge color="error" max={99} badgeContent={newDemoRequests} aria-label={`${newDemoRequests} new`}>{ICONS[item.icon]}</Badge> : ICONS[item.icon]}
+                    </ListItemIcon>
                     {!mini && <ListItemText primary={item.label} slotProps={{ primary: { variant: "body1", sx: { fontWeight: 500 } } }} />}
                   </ListItemButton>
                 );
@@ -167,7 +174,9 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
           <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, md: 1.5 } }}>
             <Box sx={{ display: { xs: "none", sm: "block" } }}><PageSearch onNavigate={(href) => router.push(href)} /></Box>
             <Tooltip title="Notifications">
-              <IconButton aria-label="Notifications" onClick={(e) => setBellAnchor(e.currentTarget)}><NotificationsIcon /></IconButton>
+              <IconButton aria-label={newDemoRequests > 0 ? `Notifications, ${newDemoRequests} new` : "Notifications"} onClick={(e) => setBellAnchor(e.currentTarget)}>
+                <Badge color="error" max={99} badgeContent={newDemoRequests}><NotificationsIcon /></Badge>
+              </IconButton>
             </Tooltip>
             <Tooltip title="Settings">
               <IconButton aria-label="Settings" onClick={() => router.push("/settings")}><SettingsIcon /></IconButton>
@@ -184,7 +193,14 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
             slotProps={{ paper: { sx: { mt: 1.5, width: 300, borderRadius: 2, p: 2 } } }}
           >
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Notifications</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>You’re all caught up.</Typography>
+            {newDemoRequests > 0 ? (
+              <>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>{newDemoRequests} new demo request{newDemoRequests === 1 ? "" : "s"} waiting for a first call.</Typography>
+                <Button id="bell-open-demo-requests" size="small" variant="contained" sx={{ mt: 1.5 }} onClick={() => { setBellAnchor(null); router.push("/demo-requests?status=new"); }}>Open demo requests</Button>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>You’re all caught up.</Typography>
+            )}
           </Popover>
           <Menu
             anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}

@@ -9,6 +9,8 @@ const schema = z.object({
   // No fallback in production: a known salt would make the hashed login-attempt keys guessable.
   RATE_LIMIT_SALT: process.env.NODE_ENV === "production" ? z.string().min(16, "RATE_LIMIT_SALT must be set (16+ characters)") : z.string().min(8).default("dev-rate-limit-salt"),
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  // Shared secret the FactoOne site sends with each demo request. Blank or unset = the intake endpoint answers 503.
+  DEMO_INTAKE_KEY: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(32, "DEMO_INTAKE_KEY must be at least 32 characters").optional()),
 });
 
 let cached: z.infer<typeof schema> | undefined;

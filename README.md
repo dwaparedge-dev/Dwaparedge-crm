@@ -23,9 +23,10 @@ Internal web app for Dwapar Edge Private Limited to manage **clients, sales, sof
 - **Software licenses** register: issue, activate, renew, suspend, reinstate, revoke; full history; days remaining; renewal opportunities.
 - **Invoices** are always raised **against a sale**, in full, as a percentage, as an amount before GST, or as an instalment of the sale's billing plan, so a sale can be billed in parts without ever being over-billed. Professional PDF format: draft → issue → (cancel). CGST+SGST or IGST by state, per-line GST rates, round-off, amount in words, bank details. Issued invoices are immutable.
 - **Payments** ledger with allocation to invoices (partial, multi-invoice, advances), reallocation, void, receipts (PDF). Payments can be recorded **for a sale**: part payments reduce the sale's remaining balance, and money received before an invoice exists is held as that sale's **advance** and applied (by you, with one click) once an invoice is issued.
+- **Demo requests** from the FactoOne website's "Book a demo" form arrive on their own page (see [docs/API.md](docs/API.md#demo-request-intake-server-to-server)): call, WhatsApp and email links, a status (New → Contacted → Scheduled → Done, or Spam), an owner, notes and a history. The number of new requests shows on the sidebar, the bell and the dashboard.
 - **Dashboard** with KPIs, trend and receivables-ageing charts, pipeline, licence health and recent activity.
 
-Not in v1 (by decision): email sending, leads/follow-ups, quotations, credit notes, CSV client import, roles/permissions, e-invoicing (IRN). See [Known limitations](#known-limitations).
+Not in v1 (by decision): email sending, a full leads pipeline with follow-up reminders (demo requests are only logged and worked by hand), quotations, credit notes, CSV client import, roles/permissions, e-invoicing (IRN). See [Known limitations](#known-limitations).
 
 ## How it flows
 
@@ -73,6 +74,7 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `JWT_EXPIRES_IN_DAYS` | no (7) | Session lifetime |
 | `BCRYPT_SALT_ROUNDS` | no (12) | Password hashing cost (10-15) |
 | `RATE_LIMIT_SALT` | no | Salt for hashing emails/IPs in the login rate limiter |
+| `DEMO_INTAKE_KEY` | no | Shared secret (32+ chars) the FactoOne site sends as `X-Intake-Key` when posting a demo request. Unset = the intake endpoint answers 503 |
 | `SEED_ADMIN_NAME/EMAIL/PASSWORD` | first run | Used only by `db:seed-admin` (password ≥ 12 chars) |
 
 `.env`, `.env.local` are git-ignored. Only `.env.example` (names and placeholders) is committed. Nothing secret is exposed to the browser: there are no `NEXT_PUBLIC_*` variables.
@@ -125,7 +127,7 @@ A sync never drops or rewrites anything, so removing or renaming a column, chang
 ## Deployment (Vercel)
 
 1. Push the repo and import it in Vercel (framework: Next.js; Node 20+).
-2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it). Use a **different** `JWT_SECRET` from local.
+2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it), and `DEMO_INTAKE_KEY` if the FactoOne site should send demo requests (see [docs/API.md](docs/API.md#demo-request-intake-server-to-server)). Use a **different** `JWT_SECRET` and `DEMO_INTAKE_KEY` from local.
 3. Sync the schema and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:sync && npm run db:seed-admin`) before the first deploy. The build does not migrate automatically, on purpose.
 4. Pick the Vercel function region closest to your Supabase region (e.g. Supabase `ap-southeast-2` → Vercel `syd1`) to keep database round trips short.
 5. Each serverless instance keeps a small pool (3 connections on Vercel). If you scale up, watch the Supabase pooler's connection limit.
@@ -150,7 +152,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for how access is controlled and the pr
 
 - **Sessions:** httpOnly, `SameSite=Lax`, `Secure` in production, signed HS256 JWT. On every request the user row is re-checked (still active, `token_version` unchanged), so deactivating a user, changing a password or signing out ends sessions immediately.
 - **Login:** bcrypt; identical response and timing for unknown email vs wrong password; lock-out after 5 failures per email / 20 per IP in 15 minutes (stored in Postgres, so it works across serverless instances). Trade-off: someone can deliberately lock a known email for 15 minutes.
-- **Authorization:** every route handler calls `requireUser()`; `proxy.ts` is only an optimistic redirect. An automated test calls **every** API route anonymously and fails if any answers anything but 401, so a new route without a login check is caught.
+- **Authorization:** every route handler calls `requireUser()`; `proxy.ts` is only an optimistic redirect. An automated test calls **every** API route anonymously and fails if any answers anything but 401, so a new route without a login check is caught. The only exceptions are login/logout and the key-protected `intake/demo-requests`, which has its own tests.
 - **CSRF:** mutating requests must be same-origin (`Origin` equals `Host`) and `application/json`.
 - **Input:** Zod on every request body and query; all SQL is parameterized (sort columns come from allow-lists).
 - **Headers:** `nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, HSTS, referrer and permissions policies. A full script-src CSP needs per-request nonces with MUI/Emotion and is left out.

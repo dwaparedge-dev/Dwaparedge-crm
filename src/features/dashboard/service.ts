@@ -20,7 +20,7 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
   if (q.from > q.to) throw new AppError("The start date is after the end date", 422, "VALIDATION_ERROR");
   const one = <T extends Record<string, unknown>>(sql: string, values: unknown[] = []) => db.queryOne<T>(sql, values);
 
-  const [clients, sales, toBill, invoiced, collected, receivables, advances, licenses, renewals, recentInvoices, expiring, activity, trend, aging, pipeline, previous, invoiceMix, upcoming, topDebtors, gst, efficiency, recentPayments] = await Promise.all([
+  const [clients, sales, toBill, invoiced, collected, receivables, advances, licenses, renewals, recentInvoices, expiring, activity, trend, aging, pipeline, previous, invoiceMix, upcoming, topDebtors, gst, efficiency, recentPayments, newDemoRequests] = await Promise.all([
     one<{ n: string }>("SELECT count(*) AS n FROM clients WHERE archived_at IS NULL"),
     one<{ n: string; v: string | null }>("SELECT count(*) AS n, sum(total) AS v FROM sales WHERE status IN ('draft','confirmed')"),
     one<{ v: string | null; n: string }>("SELECT sum(sb.unbilled_estimate) AS v, count(*) FILTER (WHERE sb.unbilled_estimate > 0) AS n FROM sales s JOIN sale_billing sb ON sb.sale_id = s.id WHERE s.status = 'confirmed'"),
@@ -127,6 +127,7 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
        LEFT JOIN field_options fo ON fo.table_name = 'payments' AND fo.column_name = 'method' AND lower(fo.option_key) = lower(p.method)
        WHERE p.voided_at IS NULL ORDER BY p.payment_date DESC, p.created_at DESC LIMIT 6`,
     ),
+    one<{ n: string }>("SELECT count(*) AS n FROM demo_requests WHERE status = 'new'"),
   ]);
 
   const n = (v: string | undefined | null) => Number(v ?? 0);
@@ -134,6 +135,7 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
     generatedAt: new Date().toISOString(),
     period: q,
     clients: { active: n(clients?.n) },
+    demoRequests: { new: n(newDemoRequests?.n) },
     sales: { open: n(sales?.n), value: sales?.v ?? "0.00", toBill: toBill?.v ?? "0.00", salesToBill: n(toBill?.n) },
     billing: {
       invoiced: { count: n(invoiced?.n), amount: invoiced?.v ?? "0.00" },

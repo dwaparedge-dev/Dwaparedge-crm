@@ -130,7 +130,8 @@ describe("request protection", () => {
 });
 
 describe("every protected endpoint requires a login", () => {
-  const PUBLIC = new Set(["auth/login", "auth/logout"]);
+  // intake/* is key-authenticated instead of session-authenticated; tests/integration/demo-requests.int.test.ts covers it.
+  const PUBLIC = new Set(["auth/login", "auth/logout", "intake/demo-requests"]);
   const root = join(process.cwd(), "src", "app", "api");
   const routes: string[] = [];
   (function walk(dir: string) {

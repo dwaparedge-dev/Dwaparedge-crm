@@ -37,10 +37,16 @@ export async function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     const ip = request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
     const isAuthRoute = pathname.startsWith("/api/auth/");
-    const limited = isAuthRoute ? overLimit(`auth:${ip}`, 30) : request.method === "GET" ? overLimit(`read:${ip}`, 300) : overLimit(`write:${ip}`, 90);
+    const isIntakeRoute = pathname.startsWith("/api/intake/");
+    // Every intake request arrives from the FactoOne server's address, so this bucket is a ceiling on all visitors
+    // together, not per visitor (the FactoOne relay throttles per visitor before calling us).
+    const limited = isIntakeRoute ? overLimit(`intake:${ip}`, 60) : isAuthRoute ? overLimit(`auth:${ip}`, 30) : request.method === "GET" ? overLimit(`read:${ip}`, 300) : overLimit(`write:${ip}`, 90);
     if (limited) {
       return NextResponse.json({ error: { code: "RATE_LIMITED", message: "Too many requests. Slow down and try again in a minute." } }, { status: 429, headers: { "Retry-After": "60" } });
     }
+    // Server-to-server intake (the FactoOne site posting a demo request) carries no staff session. Every route under
+    // /api/intake/ must call requireIntakeKey() itself: this line only skips the cookie check.
+    if (isIntakeRoute) return NextResponse.next();
   }
   const authed = await hasValidToken(request.cookies.get(COOKIE)?.value);
 

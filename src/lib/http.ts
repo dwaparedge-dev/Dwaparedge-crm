@@ -52,3 +52,19 @@ export async function readJson(request: Request): Promise<unknown> {
     throw new AppError("Request body must be valid JSON", 400, "BAD_REQUEST");
   }
 }
+
+/** For callers outside the app (no session, no Origin): requires a JSON body and refuses one over `maxChars` before parsing. */
+export async function readJsonLimited(request: Request, maxChars: number): Promise<unknown> {
+  if (!request.headers.get("content-type")?.includes("application/json")) {
+    throw new AppError("Content-Type must be application/json", 415, "UNSUPPORTED_MEDIA_TYPE");
+  }
+  const tooLarge = () => new AppError("Request body is too large", 413, "PAYLOAD_TOO_LARGE");
+  if (Number(request.headers.get("content-length") ?? 0) > maxChars) throw tooLarge();
+  const text = await request.text();
+  if (text.length > maxChars) throw tooLarge();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new AppError("Request body must be valid JSON", 400, "BAD_REQUEST");
+  }
+}

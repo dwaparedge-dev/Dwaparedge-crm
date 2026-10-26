@@ -15,7 +15,9 @@ All routes are Next.js Route Handlers under `/api`, JSON in and out, authenticat
 | 409 | Conflict: duplicate GSTIN/SKU, invalid state transition, locked record, constraint violation |
 | 415 | Body is not `application/json` |
 | 422 | Validation failed or business rule refused (allocation too large, missing tax context, …) |
-| 429 | Too many failed logins |
+| 413 | Intake body too large |
+| 429 | Too many failed logins, or too many requests from one address |
+| 503 | Intake is switched off (`DEMO_INTAKE_KEY` not set) |
 
 Mutating requests (`POST/PUT/PATCH/DELETE`) must send `Content-Type: application/json` and a same-origin `Origin` header. Lists accept `page`, `pageSize` (≤ 100), `search`, and return `{ items, total, page, pageSize }`. Money values are decimal **strings**.
 
@@ -56,5 +58,42 @@ Mutating requests (`POST/PUT/PATCH/DELETE`) must send `Content-Type: application
 | `/api/settings` | GET, PUT | Company details, bank, numbering, defaults |
 | `/api/dashboard` | GET | `?from=&to=` (YYYY-MM-DD) |
 | `/api/users/options` | GET | Active staff for dropdowns |
+| `/api/demo-requests` | GET | "Book a demo" requests from the website. Filters: `status` (`new`, `contacted`, `scheduled`, `done`, `spam`; without it everything **except spam** is listed), `ownerId`, `search` (name, company, mobile, email), `sort` (`created` default, `name`, `company`), `dir` (`desc` default). Returns `{items, total, page, pageSize, summary}`; `summary` counts each status, and `all` is everything except spam. The visitor's hashed address and browser are never returned |
+| `/api/demo-requests/summary` | GET | The same per-status counts alone. The sidebar badge and the bell read `new` from here once a minute |
+| `/api/demo-requests/{id}` | GET, PATCH | GET returns the request with its `events` (history, newest first). PATCH `{ownerId?, notes?}`: only the fields sent change, `""` or `null` clears one, the owner must be an active user (422 otherwise), notes keep their line breaks (≤ 5,000 characters). Nothing is logged when nothing changed |
+| `/api/demo-requests/{id}/status` | POST | `{status}`. Any status may follow any other (a request wrongly marked spam can be reopened); the same status again is a 409. `contacted_at` records the first time it left New for contacted, scheduled or done and is never cleared |
 | `/api/options` | GET, POST | GET `?table=&column=` lists a dropdown (no params: all, with usage, for Settings). POST `{table, column, label}` adds an option, or returns the existing one with the same name. Only whitelisted `table.column` pairs are accepted |
 | `/api/options/{id}` | PATCH, DELETE | PATCH `{label?, sortOrder?, isActive?}`; DELETE refused for built-in or in-use options |
+
+## Demo-request intake (server to server)
+
+`POST /api/intake/demo-requests` receives a "Book a demo" submission from the FactoOne site. It is the one route that does **not** use the session cookie or the same-origin check, because its caller is a server, not a browser. It is authenticated by a shared secret instead:
+
+```
+POST /api/intake/demo-requests
+Content-Type: application/json
+X-Intake-Key: <DEMO_INTAKE_KEY>
+```
+
+| Field | Rules |
+|---|---|
+| `name` | required, ≤ 120 characters |
+| `company` | required, ≤ 200 characters |
+| `mobile` | required; 10 digits starting 6-9. `+91`, `91`, a leading `0`, spaces and dashes are accepted and dropped |
+| `email` | required, valid, stored lower-cased |
+| `source` | optional label (`a-z 0-9 - _`, ≤ 50), default `landing` |
+| `entryPoint` | optional label for the button that led to the form (`navbar`, `hero`, ...) |
+| `externalRef` | optional, 8-100 characters (`A-Z a-z 0-9 - _`). The form generates one per page load; sending the same value again returns the first request instead of creating another |
+| `submitterIp`, `userAgent` | optional. The visitor's address and browser as the FactoOne server saw them. The address is stored only as a salted hash |
+
+Control characters are replaced by spaces and extra spaces collapsed. Unknown fields are ignored (a caller cannot set `status`, owner or notes).
+
+| Answer | Meaning |
+|---|---|
+| 201 `{id, duplicate: false}` | Stored as a new request with status `new` |
+| 200 `{id, duplicate: true}` | Nothing new stored: the same `externalRef` again, or the same email or mobile asking again within 24 hours (the first request's `repeat_count` goes up) |
+| 401 | Missing or wrong `X-Intake-Key` (checked before the body is read) |
+| 413 / 415 / 400 | Body over 8,000 characters / not `application/json` / not valid JSON |
+| 422 | Validation failed; `error.issues` names each field |
+| 429 | More than 60 intake calls a minute from one address (that address is the FactoOne server, so this caps all visitors together) |
+| 503 | `DEMO_INTAKE_KEY` is not set: the endpoint is off |
