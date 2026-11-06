@@ -26,6 +26,8 @@ export const regenerateSchema = z.object({
   dueDate: z.preprocess((v) => (v === "" ? undefined : v), isoDate.nullable().optional()),
   /** true = the invoice date becomes today (the invoice number keeps its original month). */
   updateInvoiceDate: z.boolean().default(false),
+  /** true = when the number is for another month than the (new) invoice date, give the invoice the next number of that month. */
+  renumberInvoice: z.boolean().default(false),
 });
 
 export const listInvoicesSchema = pageParams.extend({

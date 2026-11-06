@@ -338,4 +338,105 @@ describe("regenerating an issued invoice", () => {
     await regenerateInvoice(id, null, actor);
     expect((await invoicesWithStaleDescriptions()).find((x) => x.id === id)).toBeUndefined();
   });
+
+  describe("payments and renumbering", () => {
+    async function payInvoice(invoiceId: string, clientId: string, amount = "100") {
+      const { recordPayment } = await import("@/features/payments/service");
+      const { paymentInputSchema } = await import("@/features/payments/schema");
+      return recordPayment(paymentInputSchema.parse({ clientId, paymentDate: "2026-10-06", amount, method: "upi", allocations: [{ invoiceId, amount }] }), actor);
+    }
+
+    it("cannot be regenerated while a payment is applied, and can again once the allocation is reversed", async () => {
+      const { regenerateInvoice, getInvoice } = await import("@/features/invoices/service");
+      const { reverseAllocation } = await import("@/features/payments/service");
+      const { id } = await issuedInvoice(actor, intra);
+      const pay = await payInvoice(id, intra);
+      const versions = (await getInvoice(id)).versions.length;
+
+      await expectAppError(regenerateInvoice(id, null, actor), 409, "HAS_PAYMENTS", /payments applied/);
+      await expectAppError(regenerateInvoice(id, null, actor, null, true, true), 409, "HAS_PAYMENTS");
+      expect((await getInvoice(id)).versions).toHaveLength(versions); // nothing was written
+
+      const alloc = (await getInvoice(id)).allocations.find((a) => !a.reversed_at)!;
+      await reverseAllocation(alloc.id, "Applied to the wrong invoice", actor);
+      void pay;
+      expect(await regenerateInvoice(id, null, actor)).toBeGreaterThan(1);
+    });
+
+    it("is refused by the database too: a number or date cannot change under a payment, even with the flags on", async () => {
+      const { db } = await import("@/lib/db");
+      const { id } = await issuedInvoice(actor, intra);
+      await payInvoice(id, intra);
+      await expect(db.transaction(async (tx) => {
+        await tx.query("SELECT set_config('app.invoice_renumber', 'on', true)");
+        await tx.query("UPDATE invoices SET invoice_number = 'INV-0199-ZZ99-01' WHERE id = $1", [id]);
+      })).rejects.toThrow(/payments applied/);
+      await expect(db.transaction(async (tx) => {
+        await tx.query("SELECT set_config('app.invoice_dates_change', 'on', true)");
+        await tx.query("UPDATE invoices SET due_date = '2099-01-01' WHERE id = $1", [id]);
+      })).rejects.toThrow(/payments applied/);
+    });
+
+    it("moves the number into the month of the invoice date, using that month's next number and never the old one again", async () => {
+      const { db } = await import("@/lib/db");
+      const { todayIST } = await import("@/lib/dates");
+      const { mmyy, monthScope } = await import("@/lib/numbering");
+      const { getInvoice, getStoredInvoicePdf, listInvoices, regenerateInvoice, previewRenumber } = await import("@/features/invoices/service");
+      const c = await makeClient(actor, { stateCode: "24" });
+      const { id, number } = await issuedInvoice(actor, c, "100", "18", "2025-03-05", "2025-03-20");
+      expect(number).toMatch(/^INV-0325-/);
+      const code = number.split("-")[2]!;
+      const thisMonth = monthScope(todayIST(), code);
+
+      // The preview says what would happen, uses up nothing, and is the number that is then given.
+      const preview = await previewRenumber(id, true);
+      expect(preview).toMatchObject({ number, blocked: null });
+      expect(preview.newNumber).toBe(`INV-${mmyy(todayIST())}-${code}-01`);
+      expect(await previewRenumber(id, true)).toEqual(preview);
+      expect((await previewRenumber(id, false)).newNumber).toBeNull(); // the date stays in March: the number already fits
+      expect(await db.queryOne("SELECT 1 FROM document_sequences WHERE doc_type = 'invoice' AND scope = $1", [thisMonth])).toBeNull();
+
+      // Without asking to renumber the number stays; with it, it follows the new date.
+      await regenerateInvoice(id, null, actor, null, true);
+      expect((await getInvoice(id)).invoice_number).toBe(number);
+      await regenerateInvoice(id, "Billed in the new month", actor, undefined, false, true); // the date is already today: the old number no longer fits it
+      const inv = await getInvoice(id);
+      expect(inv.invoice_number).toBe(preview.newNumber);
+      expect(inv.versions[0]).toMatchObject({ invoice_number: preview.newNumber });
+      expect(inv.versions[0]!.reason).toBe(`Invoice number changed from ${number} to ${preview.newNumber}. Billed in the new month`);
+      expect(inv.versions.map((v) => v.invoice_number)).toEqual([preview.newNumber, number, number, number].slice(0, inv.versions.length));
+
+      // The old month's counter is untouched, so the old number is never issued again; the new month's counter moved on.
+      expect((await db.queryOne<{ last_value: number }>("SELECT last_value FROM document_sequences WHERE doc_type = 'invoice' AND scope = $1", [monthScope("2025-03-05", code)]))!.last_value).toBeGreaterThanOrEqual(1);
+      expect((await db.queryOne<{ last_value: number }>("SELECT last_value FROM document_sequences WHERE doc_type = 'invoice' AND scope = $1", [thisMonth]))!.last_value).toBe(1);
+
+      // Each stored document keeps the number it printed; downloads are named after it; the old number still finds the invoice.
+      expect((await getStoredInvoicePdf(id, 1))!.invoice_number).toBe(number);
+      expect((await getStoredInvoicePdf(id))!.invoice_number).toBe(preview.newNumber);
+      for (const q of [number, preview.newNumber!]) {
+        expect((await listInvoices({ page: 1, pageSize: 20, search: q } as never)).items.map((i) => i.id)).toContain(id);
+      }
+
+      // Regenerating again with nothing to fix leaves the number alone, and a plain edit of the number is still refused.
+      await regenerateInvoice(id, null, actor, undefined, false, true);
+      expect((await getInvoice(id)).invoice_number).toBe(preview.newNumber);
+      await expect(db.query("UPDATE invoices SET invoice_number = 'X' WHERE id = $1", [id])).rejects.toThrow(/immutable/);
+    });
+
+    it("refuses a renumber that would break the 99-a-month limit and changes nothing", async () => {
+      const { db } = await import("@/lib/db");
+      const { todayIST } = await import("@/lib/dates");
+      const { monthScope } = await import("@/lib/numbering");
+      const { getInvoice, regenerateInvoice, previewRenumber } = await import("@/features/invoices/service");
+      const c = await makeClient(actor, { stateCode: "24" });
+      const { id, number } = await issuedInvoice(actor, c, "100", "18", "2025-04-05", "2025-04-20");
+      const scope = monthScope(todayIST(), number.split("-")[2]!);
+      await db.query("INSERT INTO document_sequences (doc_type, scope, last_value) VALUES ('invoice', $1, 99) ON CONFLICT (doc_type, scope) DO UPDATE SET last_value = 99", [scope]);
+
+      expect((await previewRenumber(id, true)).blocked).toMatch(/99 invoices a month/);
+      await expectAppError(regenerateInvoice(id, null, actor, null, true, true), 422, "INVOICE_NUMBER_INVALID");
+      expect((await getInvoice(id)).invoice_number).toBe(number);
+      expect((await db.queryOne<{ last_value: number }>("SELECT last_value FROM document_sequences WHERE doc_type = 'invoice' AND scope = $1", [scope]))!.last_value).toBe(99);
+    });
+  });
 });

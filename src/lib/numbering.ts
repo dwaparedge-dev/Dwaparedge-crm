@@ -49,5 +49,13 @@ export function invoiceNumber(isoDate: string, clientCode: string, seq: number):
   return n;
 }
 
+/** The MMYY inside an invoice number ("INV-1026-AA01-01" -> "1026"), or null when it is not in that format. */
+export function invoiceNumberMonth(number: string): string | null {
+  return /^INV-(\d{4})-[A-Z]{2}\d{2}-\d{2}$/.exec(number)?.[1] ?? null;
+}
+
+/** True when the number's month and year are those of the date. A number that is not in the standard format never matches. */
+export const invoiceNumberMatchesDate = (number: string, isoDate: string) => invoiceNumberMonth(number) === mmyy(isoDate);
+
 /** Counter scope for the "nth that month" part of quotation and invoice numbers. */
 export const monthScope = (isoDate: string, clientCode: string) => `${clientCode}-${mmyy(isoDate)}`;

@@ -8,7 +8,7 @@ import { addDays, format, parseISO } from "date-fns";
 import { computeInvoiceLine, summarizeInvoice, supplyType, type InvoiceLineAmounts } from "@/lib/gst";
 import { todayIST } from "@/lib/dates";
 import { ensureClientCode, nextSequence } from "@/lib/sequences";
-import { invoiceNumber, monthScope } from "@/lib/numbering";
+import { invoiceNumber, invoiceNumberMatchesDate, monthScope } from "@/lib/numbering";
 import { buildBillingStatement, lineDescriptionFromSale, planShares, type BillMode, type DocumentSnapshot } from "@/lib/billing";
 import { formatScaled, parseScaled } from "@/lib/money";
 import { likePattern } from "@/lib/validation";
@@ -53,6 +53,8 @@ export interface InvoiceRow {
 /** One generated copy of an issued invoice. Version 1 is the original; the highest is the one in use. */
 export interface InvoiceVersionRow {
   version_no: number;
+  /** The invoice number this version printed (differs from the current one after a renumbering). */
+  invoice_number: string | null;
   reason: string | null;
   created_at: string;
   created_by_name: string | null;
@@ -100,7 +102,7 @@ export async function listInvoices(p: z.infer<typeof listInvoicesSchema>) {
   else if (p.paymentStatus === "unpaid") where.push(`i.status = 'issued' AND ${PAID} = 0 AND i.total > 0`);
   if (p.search) {
     const s = add(likePattern(p.search));
-    where.push(`(i.invoice_number ILIKE ${s} OR c.display_name ILIKE ${s} OR s.sale_number ILIKE ${s})`);
+    where.push(`(i.invoice_number ILIKE ${s} OR EXISTS (SELECT 1 FROM invoice_versions pv WHERE pv.invoice_id = i.id AND pv.invoice_number ILIKE ${s}) OR c.display_name ILIKE ${s} OR s.sale_number ILIKE ${s})`);
   }
   const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
   const filterValues = [...values];
@@ -172,9 +174,9 @@ export async function getInvoice(id: string, runner?: PoolClient) {
   );
   if (base.status === "draft") return { ...base, allocations, version: 1, versions: [] as InvoiceVersionRow[] };
 
-  const stored = await db.query<{ version_no: number; reason: string | null; created_at: string; created_by_name: string | null }>(
-    `SELECT v.version_no, v.reason, v.created_at, u.name AS created_by_name
-     FROM invoice_versions v LEFT JOIN users u ON u.id = v.created_by WHERE v.invoice_id = $1 ORDER BY v.version_no DESC`,
+  const stored = await db.query<{ version_no: number; invoice_number: string | null; reason: string | null; created_at: string; created_by_name: string | null }>(
+    `SELECT v.version_no, COALESCE(v.invoice_number, i.invoice_number) AS invoice_number, v.reason, v.created_at, u.name AS created_by_name
+     FROM invoice_versions v JOIN invoices i ON i.id = v.invoice_id LEFT JOIN users u ON u.id = v.created_by WHERE v.invoice_id = $1 ORDER BY v.version_no DESC`,
     [id],
     runner,
   );
@@ -183,7 +185,7 @@ export async function getInvoice(id: string, runner?: PoolClient) {
   if (!stored.some((v) => v.version_no === 1)) {
     // Issued before versions were recorded (or not regenerated yet): the original is the invoice row itself.
     const issuer = await db.queryOne<{ name: string | null }>("SELECT u.name FROM invoices i LEFT JOIN users u ON u.id = i.issued_by WHERE i.id = $1", [id], runner);
-    versions.push({ version_no: 1, reason: null, created_at: base.issued_at ?? base.created_at, created_by_name: issuer?.name ?? null, is_current: current === 1 });
+    versions.push({ version_no: 1, invoice_number: base.invoice_number, reason: null, created_at: base.issued_at ?? base.created_at, created_by_name: issuer?.name ?? null, is_current: current === 1 });
   }
   const latest = stored[0]
     ? await db.queryOne<{
@@ -553,9 +555,9 @@ async function storeVersion(
   const shown = items.map((i) => ({ ...i, hsn_sac: meta.itemCodes?.[i.id] ?? i.hsn_sac, description: meta.itemDescriptions?.[i.id] ?? i.description }));
   const pdf = await buildInvoicePdf({ invoice, items: shown, company: snap.company, client: snap.client, document: snap.document });
   await tx.query(
-    `INSERT INTO invoice_versions (invoice_id, version_no, client_snapshot, company_snapshot, document_snapshot, item_codes, item_descriptions, pdf, reason, created_by, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, COALESCE($11::timestamptz, now()))`,
-    [inv.id, versionNo, JSON.stringify(snap.client), JSON.stringify(snap.company), snap.document ? JSON.stringify(snap.document) : null,
+    `INSERT INTO invoice_versions (invoice_id, version_no, invoice_number, client_snapshot, company_snapshot, document_snapshot, item_codes, item_descriptions, pdf, reason, created_by, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, COALESCE($12::timestamptz, now()))`,
+    [inv.id, versionNo, inv.invoice_number, JSON.stringify(snap.client), JSON.stringify(snap.company), snap.document ? JSON.stringify(snap.document) : null,
       meta.itemCodes ? JSON.stringify(meta.itemCodes) : null, meta.itemDescriptions ? JSON.stringify(meta.itemDescriptions) : null, pdf, meta.reason, meta.actorId, meta.at ?? null],
   );
 }
@@ -576,10 +578,14 @@ async function ensureOriginalVersion(tx: PoolClient, id: string, fallbackActor: 
  * the due date may be changed at the same time; both changes are written into the version's note. The copy is added as the next
  * version; every earlier version stays and can still be opened with the date and time it was made.
  */
-export async function regenerateInvoice(id: string, reason: string | null, actorId: string, dueDate?: string | null, updateInvoiceDate = false) {
+export async function regenerateInvoice(id: string, reason: string | null, actorId: string, dueDate?: string | null, updateInvoiceDate = false, renumber = false) {
   return db.transaction(async (tx) => {
     const cur = await lockInvoice(tx, id);
     if (cur.status !== "issued") throw new AppError(`Only an issued invoice can be regenerated (this one is ${cur.status})`, 409, "INVALID_TRANSITION");
+    // The invoice row is locked, so a payment cannot be applied to it between this check and the end of the regeneration.
+    if ((await tx.query("SELECT 1 FROM payment_allocations WHERE invoice_id = $1 AND reversed_at IS NULL LIMIT 1", [id])).rowCount) {
+      throw new AppError(`${cur.invoice_number} has payments applied to it, so it cannot be regenerated. Reverse the payment allocation on the payment page first.`, 409, "HAS_PAYMENTS");
+    }
 
     const settings = await getSettings(tx);
     const missing = [!settings.legal_name && "company name", !settings.address && "company address", !settings.state_code && "company state"].filter(Boolean);
@@ -588,7 +594,8 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
     await ensureOriginalVersion(tx, id, actorId);
 
     // `dueDate`: undefined keeps the current one, null means "not specified", a date sets it.
-    // `updateInvoiceDate`: moves the invoice date to today. The number keeps the month it was issued in.
+    // `updateInvoiceDate`: moves the invoice date to today.
+    // `renumber`: gives the invoice a number for the month of its (new) invoice date, if its number is for another month.
     const notes: string[] = [];
     const was = (await tx.query<{ due_date: string | null; issue_date: string }>("SELECT to_char(due_date,'YYYY-MM-DD') AS due_date, to_char(issue_date,'YYYY-MM-DD') AS issue_date FROM invoices WHERE id = $1", [id])).rows[0]!;
     const newIssue = updateInvoiceDate ? todayIST() : was.issue_date;
@@ -611,6 +618,34 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
       }
       if (newIssue !== was.issue_date) notes.push(`Invoice date changed from ${show(was.issue_date)} to ${show(newIssue)}`);
       if (newDue !== was.due_date) notes.push(`Due date changed from ${show(was.due_date)} to ${show(newDue)}`);
+    }
+
+    // The number is INV-<MMYY of the invoice date>-<client>-<nn>. When it is for another month than the invoice date it is
+    // replaced by the next number of the date's month. The old number is never handed out again (that sequence number stays
+    // used), and it stays on the version that printed it.
+    let currentNumber = cur.invoice_number!;
+    if (renumber && !invoiceNumberMatchesDate(currentNumber, newIssue)) {
+      const oldNumber = currentNumber;
+      try {
+        const code = await ensureClientCode(cur.client_id, tx);
+        currentNumber = invoiceNumber(newIssue, code, await nextSequence("invoice", monthScope(newIssue, code), tx));
+      } catch (e) {
+        throw new AppError((e as Error).message, 422, "INVOICE_NUMBER_INVALID");
+      }
+      await tx.query("SELECT set_config('app.invoice_renumber', 'on', true)"); // lets the guard trigger allow this one change
+      try {
+        await tx.query("UPDATE invoices SET invoice_number = $1, updated_at = now() WHERE id = $2", [currentNumber, id]);
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === "23514") {
+          throw new AppError("The database has not been updated for renumbering invoices yet. Run `npm run db:sync` and then `npm run db:migrate`, then try again.", 409, "DATABASE_OUT_OF_DATE");
+        }
+        if (code === "23505") throw new AppError(`The number ${currentNumber} is already in use. Check the invoice counter in document_sequences.`, 409, "NUMBER_IN_USE");
+        throw e;
+      } finally {
+        await tx.query("SELECT set_config('app.invoice_renumber', 'off', true)");
+      }
+      notes.push(`Invoice number changed from ${oldNumber} to ${currentNumber}`);
     }
     const inv = await loadInvoice(id, tx);
     const client = await loadClient(tx, inv.client_id);
@@ -650,8 +685,19 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
     const prevWords = prevRow?.item_descriptions ?? {};
     if (inv.items.some((i) => (prevWords[i.id] ?? i.description) !== itemDescriptions[i.id])) notes.push("Item descriptions updated from the sale");
     const note = [...notes, reason].filter(Boolean).join(". ") || null;
-    await storeVersion(tx, inv, version, snap, { reason: note, actorId, itemCodes, itemDescriptions });
-    await logActivity({ entityType: "invoice", entityId: id, clientId: cur.client_id, action: "regenerated", summary: `Invoice ${cur.invoice_number} regenerated (version ${version})${note ? `: ${note}` : ""}`, actorId, metadata: { version, changes: notes } }, tx);
+    try {
+      await storeVersion(tx, inv, version, snap, { reason: note, actorId, itemCodes, itemDescriptions });
+    } catch (e) {
+      if ((e as { code?: string }).code === "42703") {
+        throw new AppError("The database has not been updated for this version yet. Run `npm run db:sync` and then `npm run db:migrate`, then try again.", 409, "DATABASE_OUT_OF_DATE");
+      }
+      throw e;
+    }
+    await logActivity({
+      entityType: "invoice", entityId: id, clientId: cur.client_id, action: "regenerated",
+      summary: `Invoice ${currentNumber} regenerated (version ${version})${note ? `: ${note}` : ""}`, actorId,
+      metadata: { version, changes: notes, ...(currentNumber !== cur.invoice_number ? { previousNumber: cur.invoice_number } : {}) },
+    }, tx);
     return version;
   });
 }
@@ -659,7 +705,7 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
 /** The PDF kept for a version (default: the current one), or null when there is none and it has to be drawn live. */
 export async function getStoredInvoicePdf(id: string, version?: number) {
   const row = await db.queryOne<{ pdf: Buffer; version_no: number; invoice_number: string | null }>(
-    `SELECT v.pdf, v.version_no, i.invoice_number FROM invoice_versions v JOIN invoices i ON i.id = v.invoice_id
+    `SELECT v.pdf, v.version_no, COALESCE(v.invoice_number, i.invoice_number) AS invoice_number FROM invoice_versions v JOIN invoices i ON i.id = v.invoice_id
      WHERE v.invoice_id = $1 AND ($2::int IS NULL OR v.version_no = $2) ORDER BY v.version_no DESC LIMIT 1`,
     [id, version ?? null],
   );
@@ -672,12 +718,13 @@ export async function getStoredInvoicePdf(id: string, version?: number) {
  * regenerated), with what each line would become. Regenerating such an invoice brings it up to date.
  */
 export async function invoicesWithStaleDescriptions() {
-  const invoices = await db.query<{ id: string; invoice_number: string; issued_by: string | null; milestone_title: string | null }>(
+  const invoices = await db.query<{ id: string; invoice_number: string; issued_by: string | null; paid: boolean; milestone_title: string | null }>(
     `SELECT i.id, i.invoice_number, i.issued_by,
+            EXISTS (SELECT 1 FROM payment_allocations a WHERE a.invoice_id = i.id AND a.reversed_at IS NULL) AS paid,
             COALESCE((SELECT v.document_snapshot FROM invoice_versions v WHERE v.invoice_id = i.id ORDER BY v.version_no DESC LIMIT 1), i.document_snapshot)->'milestone'->>'title' AS milestone_title
      FROM invoices i WHERE i.status = 'issued' ORDER BY i.created_at`,
   );
-  const out: { id: string; invoice_number: string; issued_by: string | null; changes: { from: string; to: string }[] }[] = [];
+  const out: { id: string; invoice_number: string; issued_by: string | null; /** payments applied: it cannot be regenerated */ paid: boolean; changes: { from: string; to: string }[] }[] = [];
   for (const inv of invoices) {
     const latest = await db.queryOne<{ item_descriptions: Record<string, string> | null }>(
       "SELECT item_descriptions FROM invoice_versions WHERE invoice_id = $1 ORDER BY version_no DESC LIMIT 1", [inv.id],
@@ -690,7 +737,35 @@ export async function invoicesWithStaleDescriptions() {
       const wanted = l.sale_description ? lineDescriptionFromSale(shown, l.sale_description, inv.milestone_title) : shown;
       return wanted !== shown ? [{ from: shown, to: wanted }] : [];
     });
-    if (changes.length) out.push({ id: inv.id, invoice_number: inv.invoice_number, issued_by: inv.issued_by, changes });
+    if (changes.length) out.push({ id: inv.id, invoice_number: inv.invoice_number, issued_by: inv.issued_by, paid: inv.paid, changes });
   }
   return out;
+}
+
+/**
+ * What regenerating would do to the invoice number, without doing it or using up a number: the number it would get
+ * (null when it keeps its number), and why regenerating is not possible, if so.
+ */
+export async function previewRenumber(id: string, updateInvoiceDate: boolean) {
+  const inv = await db.queryOne<{ invoice_number: string | null; status: string; client_id: string; issue_date: string; paid: boolean }>(
+    `SELECT i.invoice_number, i.status, i.client_id, to_char(i.issue_date,'YYYY-MM-DD') AS issue_date,
+            EXISTS (SELECT 1 FROM payment_allocations a WHERE a.invoice_id = i.id AND a.reversed_at IS NULL) AS paid
+     FROM invoices i WHERE i.id = $1`, [id],
+  );
+  if (!inv) throw new AppError("Invoice not found", 404, "NOT_FOUND");
+  const number = inv.invoice_number;
+  const blocked = inv.status !== "issued" ? "Only an issued invoice can be regenerated" : inv.paid ? "Payments are applied to this invoice" : null;
+  if (!number || inv.status !== "issued") return { number, newNumber: null as string | null, invoiceDate: inv.issue_date, blocked };
+  const invoiceDate = updateInvoiceDate ? todayIST() : inv.issue_date;
+  if (invoiceNumberMatchesDate(number, invoiceDate)) return { number, newNumber: null as string | null, invoiceDate, blocked };
+  const code = (await db.queryOne<{ code: string | null }>("SELECT code FROM clients WHERE id = $1", [inv.client_id]))?.code;
+  const last = code ? (await db.queryOne<{ last_value: number }>("SELECT last_value FROM document_sequences WHERE doc_type = 'invoice' AND scope = $1", [monthScope(invoiceDate, code)]))?.last_value ?? 0 : 0;
+  let newNumber: string | null = null;
+  let problem: string | null = null;
+  try {
+    newNumber = code ? invoiceNumber(invoiceDate, code, last + 1) : null;
+  } catch (e) {
+    problem = (e as Error).message;
+  }
+  return { number, newNumber, invoiceDate, blocked: blocked ?? problem };
 }

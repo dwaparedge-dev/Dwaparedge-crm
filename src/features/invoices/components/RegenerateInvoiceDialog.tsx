@@ -15,7 +15,9 @@ import FormLabel from "@mui/material/FormLabel";
 import Radio from "@mui/material/Radio";
 import RadioGroup from "@mui/material/RadioGroup";
 import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
 import { format, parseISO } from "date-fns";
+import { useFetch } from "@/components/common/useFetch";
 import { api } from "@/lib/api-client";
 
 interface Props {
@@ -28,6 +30,16 @@ interface Props {
   onDone: (version: number) => void;
 }
 
+/** What regenerating would do to the number, from the server (nothing is changed or used up by asking). */
+interface Preview {
+  number: string | null;
+  /** The number it would get; null when it keeps its number. */
+  newNumber: string | null;
+  invoiceDate: string;
+  /** Why it cannot be regenerated, if so. */
+  blocked: string | null;
+}
+
 /** Regenerate an issued invoice. The note is optional and is shown in the version history. */
 export function RegenerateInvoiceDialog({ invoiceId, invoiceNumber, issueDate, dueDate, onClose, onDone }: Props) {
   const [reason, setReason] = useState("");
@@ -35,8 +47,13 @@ export function RegenerateInvoiceDialog({ invoiceId, invoiceNumber, issueDate, d
   const [updateDate, setUpdateDate] = useState(true);
   const [due, setDue] = useState<"keep" | "none" | "date">("keep");
   const [newDate, setNewDate] = useState(dueDate ?? "");
+  const [renumber, setRenumber] = useState(true);
+  const [understood, setUnderstood] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const preview = useFetch<Preview>(`/api/invoices/${invoiceId}/regenerate?updateInvoiceDate=${updateDate}`);
+  const p = preview.data;
+  const changesNumber = Boolean(p?.newNumber) && renumber;
 
   async function submit() {
     const invoiceDate = updateDate ? today : issueDate;
@@ -52,7 +69,7 @@ export function RegenerateInvoiceDialog({ invoiceId, invoiceNumber, issueDate, d
     setBusy(true);
     setError(null);
     try {
-      const { version } = await api<{ version: number }>(`/api/invoices/${invoiceId}/regenerate`, { method: "POST", body: { reason, updateInvoiceDate: updateDate, ...(due === "none" ? { dueDate: null } : due === "date" ? { dueDate: newDate } : {}) } });
+      const { version } = await api<{ version: number }>(`/api/invoices/${invoiceId}/regenerate`, { method: "POST", body: { reason, updateInvoiceDate: updateDate, renumberInvoice: changesNumber, ...(due === "none" ? { dueDate: null } : due === "date" ? { dueDate: newDate } : {}) } });
       onDone(version);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not regenerate the invoice");
@@ -66,13 +83,32 @@ export function RegenerateInvoiceDialog({ invoiceId, invoiceNumber, issueDate, d
       <DialogContent sx={{ display: "grid", gap: 2 }}>
         <DialogContentText component="div">
           A new version of <strong>{invoiceNumber}</strong> is made with the client, company and project details as they are today and the current layout.
-          The invoice number, lines and amounts stay exactly the same, and every earlier version is kept with its date and time.
+          The lines and amounts stay exactly the same, the invoice number stays unless you choose to change it below, and every earlier version is kept with its date and time.
         </DialogContentText>
+        {p?.blocked && <Alert severity="error">{p.blocked}. Reverse the payment allocation on the payment page first, then regenerate.</Alert>}
         {error && <Alert severity="error">{error}</Alert>}
         <FormControlLabel
           control={<Checkbox checked={updateDate} onChange={(e) => setUpdateDate(e.target.checked)} />}
           label={<>Update the invoice date to today <Box component="span" sx={{ color: "text.secondary" }}>({format(parseISO(today), "dd MMM yyyy")}; now {format(parseISO(issueDate), "dd MMM yyyy")})</Box></>}
         />
+        {p?.newNumber && (
+          <Box sx={{ p: 1.5, border: 1, borderColor: "warning.main", borderRadius: 2, display: "grid" }}>
+            <FormControlLabel
+              control={<Checkbox checked={renumber} onChange={(e) => setRenumber(e.target.checked)} />}
+              label={<>Change the invoice number to match the month of the invoice date: <strong>{p.number}</strong> → <strong>{p.newNumber}</strong></>}
+            />
+            {renumber ? (
+              <FormControlLabel
+                control={<Checkbox checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />}
+                label="I understand the old number will no longer belong to this invoice, and that this invoice has not been sent to the client or filed for GST under it."
+              />
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ pl: 4 }}>
+                The number stays {p.number}, although the invoice will be dated {format(parseISO(p.invoiceDate), "dd MMM yyyy")}.
+              </Typography>
+            )}
+          </Box>
+        )}
         <FormControl>
           <FormLabel>Payment due date</FormLabel>
           <RadioGroup value={due} onChange={(e) => setDue(e.target.value as typeof due)}>
@@ -89,7 +125,7 @@ export function RegenerateInvoiceDialog({ invoiceId, invoiceNumber, issueDate, d
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={busy}>Back</Button>
-        <Button variant="contained" onClick={submit} disabled={busy}>{busy ? "Generating…" : "Regenerate"}</Button>
+        <Button variant="contained" onClick={submit} disabled={busy || preview.loading || Boolean(p?.blocked) || (changesNumber && !understood)}>{busy ? "Generating…" : "Regenerate"}</Button>
       </DialogActions>
     </Dialog>
   );

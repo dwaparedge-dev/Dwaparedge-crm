@@ -113,6 +113,7 @@ export function InvoiceDetail({ id }: { id: string }) {
   }
 
   const live = inv.allocations.filter((a) => !a.reversed_at);
+  const earlierNumbers = [...new Set(inv.versions.map((v) => v.invoice_number).filter((n): n is string => Boolean(n) && n !== inv.invoice_number))];
   const statusLabel = isDraft ? "Draft" : inv.status === "cancelled" ? "Cancelled" : inv.payment_status === "paid" ? "Paid" : inv.is_overdue ? (inv.payment_status === "partial" ? "Overdue · partial" : "Overdue") : inv.payment_status === "partial" ? "Partially paid" : "Unpaid";
   const statusKey = isDraft ? "pending" : inv.status === "cancelled" ? "inactive" : inv.payment_status === "paid" ? "completed" : inv.is_overdue ? "warning" : "info";
   const tabs = [
@@ -143,6 +144,7 @@ export function InvoiceDetail({ id }: { id: string }) {
               { label: "Invoice date", value: format(parseISO(inv.issue_date), "dd MMM yyyy") },
               { label: "Due date", value: inv.due_date ? format(parseISO(inv.due_date), "dd MMM yyyy") : "Not specified" },
               { label: "Place of supply", value: inv.place_of_supply_state_code ? `${stateNameByCode(inv.place_of_supply_state_code)} (${inv.place_of_supply_state_code})` : "—" },
+              ...(earlierNumbers.length ? [{ label: "Earlier numbers", value: earlierNumbers.join("\n"), isMonospace: true }] : []),
               ...(inv.version > 1 ? [{ label: "Current version", value: `v${inv.version} · ${format(new Date(inv.versions[0]!.created_at), "dd MMM yyyy, hh:mm a")}` }] : []),
               ...(inv.supply_type ? [{ label: "Tax type", value: inv.supply_type === "intra" ? "CGST + SGST" : "IGST" }] : []),
               ...(snap?.billingAddress ? [{ label: "Billing address", value: snap.billingAddress }] : []),
@@ -156,7 +158,7 @@ export function InvoiceDetail({ id }: { id: string }) {
                 {!isDraft && <Button fullWidth variant="outlined" startIcon={<DownloadIcon />} href={`${pdf}?download=1`}>Download</Button>}
                 {isDraft && <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit draft</Button>}
                 {isDraft && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("delete")}>Delete draft</Button>}
-                {inv.status === "issued" && <Button fullWidth variant="outlined" startIcon={<RefreshIcon />} onClick={() => setDialog("regen")}>Regenerate invoice</Button>}
+                {inv.status === "issued" && <Button fullWidth variant="outlined" startIcon={<RefreshIcon />} onClick={() => setDialog("regen")} disabled={live.length > 0}>Regenerate invoice</Button>}
                 {inv.status === "issued" && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("cancel")}>Cancel invoice</Button>}
               </HeroActions>
             }
@@ -183,6 +185,7 @@ export function InvoiceDetail({ id }: { id: string }) {
       )}
         {isDraft && <Alert severity="info" sx={{ mb: 2 }}>Draft: not numbered and not yet a financial record. Review it, then issue it.</Alert>}
         {inv.status === "cancelled" && <Alert severity="error" sx={{ mb: 2 }}>Cancelled on {inv.cancelled_at && format(new Date(inv.cancelled_at), "dd MMM yyyy")}: {inv.cancel_reason}</Alert>}
+        {inv.status === "issued" && live.length > 0 && <Alert severity="info" sx={{ mb: 2 }}>Payments are applied to this invoice, so it cannot be regenerated, renumbered or redated. To change it, reverse the payment allocation on the payment page first.</Alert>}
         {inv.status === "issued" && inv.is_overdue && inv.due_date && <Alert severity="warning" sx={{ mb: 2 }}>This invoice was due on {format(parseISO(inv.due_date), "dd MMM yyyy")} and still has a balance of {formatMoney(inv.balance_due)}.</Alert>}
 
         <DetailViewTabs tabs={tabs} activeTab={Math.min(tab, tabs.length - 1)} onChange={setTab}>
@@ -249,11 +252,12 @@ export function InvoiceDetail({ id }: { id: string }) {
               </Typography>
               <TableContainer>
                 <Table size="small">
-                  <TableHead><TableRow><TableCell>Version</TableCell><TableCell>Generated</TableCell><TableCell>By</TableCell><TableCell>Note</TableCell><TableCell>Status</TableCell><TableCell align="right">Document</TableCell></TableRow></TableHead>
+                  <TableHead><TableRow><TableCell>Version</TableCell><TableCell>Invoice no.</TableCell><TableCell>Generated</TableCell><TableCell>By</TableCell><TableCell>Note</TableCell><TableCell>Status</TableCell><TableCell align="right">Document</TableCell></TableRow></TableHead>
                   <TableBody>
                     {inv.versions.map((v) => (
                       <TableRow key={v.version_no}>
                         <TableCell sx={{ fontWeight: 600 }}>v{v.version_no}{v.version_no === 1 && <Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}> · original</Box>}</TableCell>
+                        <TableCell sx={{ fontFamily: "monospace", whiteSpace: "nowrap" }}>{v.invoice_number ?? "—"}</TableCell>
                         <TableCell>{format(new Date(v.created_at), "dd MMM yyyy, hh:mm a")}</TableCell>
                         <TableCell>{v.created_by_name ?? "—"}</TableCell>
                         <TableCell>{v.reason ?? "—"}</TableCell>

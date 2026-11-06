@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS invoice_versions (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   invoice_id        UUID        NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
   version_no        INTEGER     NOT NULL CHECK (version_no >= 1),
+  invoice_number    TEXT,                   -- the number this version printed (it changes when an invoice is renumbered); NULL is read as the invoice's own number
   client_snapshot   JSONB       NOT NULL,   -- client details printed on this version
   company_snapshot  JSONB       NOT NULL,   -- our details and bank details printed on this version
   document_snapshot JSONB,                  -- project references, milestone and billing schedule printed on this version

@@ -13,22 +13,34 @@ BEGIN
   IF NEW.status NOT IN ('issued','cancelled') THEN
     RAISE EXCEPTION 'An issued invoice cannot go back to %', NEW.status USING ERRCODE = 'check_violation';
   END IF;
-  IF ROW(NEW.invoice_number, NEW.client_id, NEW.sale_id, NEW.currency,
+  IF ROW(NEW.client_id, NEW.sale_id, NEW.currency,
          NEW.place_of_supply_state_code, NEW.supply_type, NEW.subtotal, NEW.cgst_total, NEW.sgst_total, NEW.igst_total,
          NEW.tax_total, NEW.round_off, NEW.total, NEW.payment_terms, NEW.notes, NEW.client_snapshot, NEW.company_snapshot, NEW.document_snapshot,
          NEW.issued_at, NEW.issued_by)
      IS DISTINCT FROM
-     ROW(OLD.invoice_number, OLD.client_id, OLD.sale_id, OLD.currency,
+     ROW(OLD.client_id, OLD.sale_id, OLD.currency,
          OLD.place_of_supply_state_code, OLD.supply_type, OLD.subtotal, OLD.cgst_total, OLD.sgst_total, OLD.igst_total,
          OLD.tax_total, OLD.round_off, OLD.total, OLD.payment_terms, OLD.notes, OLD.client_snapshot, OLD.company_snapshot, OLD.document_snapshot,
          OLD.issued_at, OLD.issued_by) THEN
     RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
   END IF;
-  -- The invoice date and the due date are the two terms that may change after issue, and only while an invoice is being
-  -- regenerated (the service sets this flag for its own transaction); the change is audited in the activity log and the version note.
-  IF (NEW.issue_date IS DISTINCT FROM OLD.issue_date OR NEW.due_date IS DISTINCT FROM OLD.due_date)
-     AND COALESCE(current_setting('app.invoice_dates_change', true), '') <> 'on' THEN
-    RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
+  -- The invoice date, the due date and the invoice number are the only things that may change after issue, and only while an
+  -- invoice is being regenerated (the service sets a flag for its own transaction); each change is audited in the activity
+  -- log and the version note. None of them may change once a payment is applied to the invoice: receipts and the client's
+  -- records already carry its number and dates.
+  IF NEW.issue_date IS DISTINCT FROM OLD.issue_date OR NEW.due_date IS DISTINCT FROM OLD.due_date THEN
+    IF COALESCE(current_setting('app.invoice_dates_change', true), '') <> 'on' THEN
+      RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF NEW.invoice_number IS DISTINCT FROM OLD.invoice_number THEN
+    IF COALESCE(current_setting('app.invoice_renumber', true), '') <> 'on' THEN
+      RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF (NEW.issue_date IS DISTINCT FROM OLD.issue_date OR NEW.due_date IS DISTINCT FROM OLD.due_date OR NEW.invoice_number IS DISTINCT FROM OLD.invoice_number)
+     AND EXISTS (SELECT 1 FROM payment_allocations a WHERE a.invoice_id = OLD.id AND a.reversed_at IS NULL) THEN
+    RAISE EXCEPTION 'Invoice % has payments applied, so its number and dates cannot change', OLD.invoice_number USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $$ LANGUAGE plpgsql;

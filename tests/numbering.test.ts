@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientCodeFromIndex, invoiceNumber, MAX_CLIENT_CODES, mmyy, monthScope, quotationNumber, saleNumber } from "@/lib/numbering";
+import { clientCodeFromIndex, invoiceNumber, invoiceNumberMatchesDate, invoiceNumberMonth, MAX_CLIENT_CODES, mmyy, monthScope, quotationNumber, saleNumber } from "@/lib/numbering";
 
 describe("client codes", () => {
   it("run AA01..AA99, then AB01, and roll the first letter after AZ99", () => {
@@ -38,5 +38,20 @@ describe("document numbers", () => {
   });
   it("rejects a bad date", () => {
     expect(() => mmyy("12/10/2026")).toThrow();
+  });
+});
+
+describe("invoice number month", () => {
+  it("reads the month and year out of an invoice number", () => {
+    expect(invoiceNumberMonth("INV-1026-AA01-01")).toBe("1026");
+    expect(invoiceNumberMonth("INV-0127-ZZ99-12")).toBe("0127");
+    expect(invoiceNumberMonth("2026/27/0001")).toBeNull();
+    expect(invoiceNumberMonth("INV-1026-AA01-123")).toBeNull();
+  });
+  it("matches a date only in the same month and year", () => {
+    expect(invoiceNumberMatchesDate("INV-1026-AA01-01", "2026-10-31")).toBe(true);
+    expect(invoiceNumberMatchesDate("INV-1026-AA01-01", "2026-11-01")).toBe(false);
+    expect(invoiceNumberMatchesDate("INV-1026-AA01-01", "2025-10-15")).toBe(false);
+    expect(invoiceNumberMatchesDate("legacy-number", "2026-10-15")).toBe(false);
   });
 });
