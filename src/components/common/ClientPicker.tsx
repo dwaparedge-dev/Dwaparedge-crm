@@ -16,10 +16,12 @@ interface Props {
   onChange: (id: string, option: ClientOption | null) => void;
   disabled?: boolean;
   error?: string;
+  /** Marks the field required (the default). Pass false where a client is optional. */
+  required?: boolean;
 }
 
 /** Searchable client selector (server-side search, active clients only). */
-export function ClientPicker({ value, onChange, disabled, error }: Props) {
+export function ClientPicker({ value, onChange, disabled, error, required = true }: Props) {
   const [options, setOptions] = useState<ClientOption[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -66,7 +68,7 @@ export function ClientPicker({ value, onChange, disabled, error }: Props) {
           {o.gstin && <span style={{ marginLeft: 8, opacity: 0.6, fontSize: 12 }}>{o.gstin}</span>}
         </li>
       )}
-      renderInput={(params) => <TextField {...params} slotProps={autocompleteLoading(params, loading)} label="Client" required error={Boolean(error)} helperText={error} />}
+      renderInput={(params) => <TextField {...params} slotProps={autocompleteLoading(params, loading)} label="Client" required={required} error={Boolean(error)} helperText={error} />}
     />
   );
 }
