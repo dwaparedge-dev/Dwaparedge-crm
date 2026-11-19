@@ -47,4 +47,20 @@ describe("dashboard", () => {
     expect(d.recentPayments).toHaveLength(1);
     expect(d.invoiceMix.partial + d.invoiceMix.overdue).toBe(1);
   });
+
+  it("keeps permission changes, which name email addresses, off the recent activity feed", async () => {
+    const { getDashboard, dashboardQuerySchema } = await import("@/features/dashboard/service");
+    const { db } = await import("@/lib/db");
+    const target = await makeUser("Target");
+    // An ordinary entry first, then the permission change as the newest row: without the filter it would head the feed.
+    await db.query("INSERT INTO activity_log (entity_type, entity_id, action, summary, actor_id) VALUES ('demo_request', gen_random_uuid(), 'status_changed', 'Moved a request to Contacted', NULL)");
+    await db.query(
+      "INSERT INTO activity_log (entity_type, entity_id, action, summary, actor_id) VALUES ('user', $1, 'permission_granted', $2, NULL)",
+      [target.id, `Granted tasks.view_all to ${target.email}`],
+    );
+    const d = await getDashboard(dashboardQuerySchema.parse({ from: "2026-10-01", to: "2026-10-31" }));
+    expect(d.recentActivity.map((a) => a.summary)).toContain("Moved a request to Contacted");
+    expect(d.recentActivity.map((a) => a.entity_type)).not.toContain("user");
+    expect(JSON.stringify(d.recentActivity)).not.toContain(target.email);
+  });
 });
