@@ -79,7 +79,8 @@ export const taskStatusSchema = z
   .object({
     status: z.enum(TASK_STATUSES),
     waitingOn: optionalPlainText(200),
-    followUpAt: z.preprocess((v) => (v === "" ? undefined : v), taskDateTime).optional(),
+    // A cleared time input arrives as "" and means "none"; the optional sits inside the preprocess so the undefined it makes is accepted.
+    followUpAt: z.preprocess((v) => (v === "" ? undefined : v), taskDateTime.optional()),
   })
   .refine((v) => v.status !== "waiting" || v.followUpAt !== undefined, {
     message: "Say when to look at it again",

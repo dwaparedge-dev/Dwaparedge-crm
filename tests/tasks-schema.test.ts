@@ -23,6 +23,13 @@ const base = { title: "Call Raj", categoryId: CATEGORY, priorityId: PRIORITY };
 const failedPaths = (r: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
   r.error?.issues.map((i) => i.path.join(".")) ?? [];
 
+/** Each failed parse as its field path and message, to pin both. */
+const issues = (r: { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } }) =>
+  r.error?.issues.map((i) => ({ path: i.path.join("."), message: i.message })) ?? [];
+
+const WAIT_MESSAGE = "Say when to look at it again";
+const TIME_MESSAGE = "Use a date and time with a time zone, like 2026-11-20T10:00:00+05:30";
+
 describe("shared text helpers", () => {
   it("cleanText turns control characters into spaces, collapses runs and trims", () => {
     expect(cleanText("  Call\u0000 Raj \n now ")).toBe("Call Raj now");
@@ -146,6 +153,16 @@ describe("update task", () => {
     });
   });
 
+  it("a blank follow-up time or cadence clears it, on update and on create, rather than being refused", () => {
+    expect(issues(updateTaskSchema.safeParse({ followUpAt: "" }))).toEqual([]);
+    expect(updateTaskSchema.parse({ followUpAt: "" })).toEqual({ followUpAt: null });
+    expect(updateTaskSchema.parse({ followUpEveryDays: "" })).toEqual({ followUpEveryDays: null });
+    expect(updateTaskSchema.parse({ dueDate: "" })).toEqual({ dueDate: null });
+    expect(updateTaskSchema.parse({ description: "" })).toEqual({ description: null });
+    expect(createTaskSchema.parse({ ...base, followUpEveryDays: "" }).followUpEveryDays).toBeNull();
+    expect(createTaskSchema.parse({ ...base, followUpAt: "" }).followUpAt).toBeNull();
+  });
+
   it("refuses an empty change and fields that must keep a value", () => {
     expect(updateTaskSchema.safeParse({}).success).toBe(false);
     expect(updateTaskSchema.safeParse({ status: "done" }).success).toBe(false); // status moves only through its own endpoint
@@ -172,8 +189,18 @@ describe("task status", () => {
     const r = taskStatusSchema.safeParse({ status: "waiting" });
     expect(r.success).toBe(false);
     expect(failedPaths(r)).toEqual(["followUpAt"]);
-    expect(taskStatusSchema.safeParse({ status: "waiting", waitingOn: "Raj", followUpAt: "" }).success).toBe(false);
-    expect(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "not a time" }).success).toBe(false);
+    expect(issues(taskStatusSchema.safeParse({ status: "waiting", waitingOn: "Raj", followUpAt: "" }))).toEqual([{ path: "followUpAt", message: WAIT_MESSAGE }]);
+    expect(issues(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "not a time" }))).toEqual([{ path: "followUpAt", message: TIME_MESSAGE }]);
+  });
+
+  it("a blank follow-up time means none: any status but waiting accepts it and drops it", () => {
+    for (const status of ["open", "in_progress", "done", "cancelled"]) {
+      const r = taskStatusSchema.safeParse({ status, followUpAt: "" });
+      expect(issues(r), status).toEqual([]);
+      expect(r.data, status).toEqual({ status });
+      expect(r.data?.followUpAt, status).toBeUndefined();
+    }
+    expect(taskStatusSchema.parse({ status: "done", waitingOn: "  ", followUpAt: "" })).toEqual({ status: "done" });
   });
 
   it("waiting with a time is fine; the 'waiting on' text is cleaned, capped at 200, and may be blank", () => {
@@ -344,8 +371,9 @@ describe("strict dates and times", () => {
 
   it("waiting still needs a follow-up time, and a malformed one does not satisfy it", () => {
     expect(failedPaths(taskStatusSchema.safeParse({ status: "waiting" }))).toEqual(["followUpAt"]);
-    expect(failedPaths(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "" }))).toEqual(["followUpAt"]);
-    expect(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "2026-11-20T10:00" }).success).toBe(false);
+    expect(issues(taskStatusSchema.safeParse({ status: "waiting" }))).toEqual([{ path: "followUpAt", message: WAIT_MESSAGE }]);
+    expect(issues(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "" }))).toEqual([{ path: "followUpAt", message: WAIT_MESSAGE }]);
+    expect(issues(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "2026-11-20T10:00" }))).toEqual([{ path: "followUpAt", message: TIME_MESSAGE }]);
     expect(taskStatusSchema.parse({ status: "done" })).toEqual({ status: "done" });
   });
 });
