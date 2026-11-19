@@ -25,20 +25,21 @@ ON CONFLICT DO NOTHING;
 INSERT INTO company_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
 
 -- Starter task categories and priorities (the Task Desk). Same rule: existing rows are left as they are, so a renamed,
--- recoloured or hidden row is never reset. is_system marks the rows the auto-task rules rely on.
+-- recoloured or hidden row is never reset. Every starter row is is_system (as in field_options): it can be renamed, recoloured
+-- or hidden but never deleted, because a deleted row would come back the next time this file is applied.
 INSERT INTO task_categories (key, name, colour, default_follow_up_days, sort_order, is_system) VALUES
   ('sales_leads','Sales & leads','#6366f1',2,10,true),
   ('collections','Collections','#0d9488',3,20,true),
   ('billing','Billing & invoicing','#0284c7',NULL,30,true),
   ('licences','Licences & renewals','#d97706',7,40,true),
-  ('clients_support','Clients & support','#db2777',NULL,50,false),
-  ('delivery','Delivery','#16a34a',NULL,60,false),
-  ('finance_compliance','Finance & compliance','#64748b',NULL,70,false),
-  ('admin_hiring','Admin & hiring','#8b5cf6',NULL,80,false)
+  ('clients_support','Clients & support','#db2777',NULL,50,true),
+  ('delivery','Delivery','#16a34a',NULL,60,true),
+  ('finance_compliance','Finance & compliance','#64748b',NULL,70,true),
+  ('admin_hiring','Admin & hiring','#8b5cf6',NULL,80,true)
 ON CONFLICT (key) DO NOTHING;
 INSERT INTO task_priorities (key, name, colour, rank, sort_order, is_system) VALUES
-  ('critical','Critical','#dc2626',1,10,false),
+  ('critical','Critical','#dc2626',1,10,true),
   ('high','High','#ea580c',2,20,true),
   ('normal','Normal','#2563eb',3,30,true),
-  ('low','Low','#6b7280',4,40,false)
+  ('low','Low','#6b7280',4,40,true)
 ON CONFLICT (key) DO NOTHING;

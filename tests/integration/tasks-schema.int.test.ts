@@ -143,16 +143,17 @@ describe("task categories and priorities", () => {
       "SELECT key, is_system, default_follow_up_days, is_active FROM task_categories ORDER BY sort_order",
     );
     expect(categories.map((c) => c.key)).toEqual(["sales_leads", "collections", "billing", "licences", "clients_support", "delivery", "finance_compliance", "admin_hiring"]);
-    expect(categories.filter((c) => c.is_system).map((c) => c.key)).toEqual(["sales_leads", "collections", "billing", "licences"]);
+    // Every starter row is protected: a deleted one would come back the next time the seeds are applied.
+    expect(categories.every((c) => c.is_system)).toBe(true);
     expect(Object.fromEntries(categories.filter((c) => c.default_follow_up_days !== null).map((c) => [c.key, c.default_follow_up_days]))).toEqual({ collections: 3, sales_leads: 2, licences: 7 });
     expect(categories.every((c) => c.is_active)).toBe(true);
 
     const priorities = await db.query<{ key: string; rank: number; is_system: boolean }>("SELECT key, rank, is_system FROM task_priorities ORDER BY rank");
     expect(priorities).toEqual([
-      { key: "critical", rank: 1, is_system: false },
+      { key: "critical", rank: 1, is_system: true },
       { key: "high", rank: 2, is_system: true },
       { key: "normal", rank: 3, is_system: true },
-      { key: "low", rank: 4, is_system: false },
+      { key: "low", rank: 4, is_system: true },
     ]);
   });
 
