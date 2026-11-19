@@ -5,7 +5,7 @@ import { requireUserPage } from "@/lib/auth/current-user";
 
 async function AuthedShell({ children }: { children: React.ReactNode }) {
   const user = await requireUserPage();
-  return <AppShell user={{ name: user.name, email: user.email }}>{children}</AppShell>;
+  return <AppShell user={{ id: user.id, name: user.name, email: user.email, permissions: user.permissions }}>{children}</AppShell>;
 }
 
 export default function DashboardLayout({ children }: LayoutProps<"/">) {

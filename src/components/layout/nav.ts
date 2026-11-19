@@ -1,7 +1,7 @@
 export interface NavItem {
   label: string;
   href: string;
-  icon: "dashboard" | "demoRequests" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
+  icon: "dashboard" | "tasks" | "demoRequests" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
   ready: boolean;
 }
 
@@ -13,7 +13,14 @@ export interface NavGroup {
 }
 
 export const NAV_GROUPS: NavGroup[] = [
-  { title: "Overview", dot: "#FDB528", items: [{ label: "Dashboard", href: "/", icon: "dashboard", ready: true }] },
+  {
+    title: "Overview", dot: "#FDB528",
+    items: [
+      { label: "Dashboard", href: "/", icon: "dashboard", ready: true },
+      { label: "Desk", href: "/tasks", icon: "tasks", ready: true },
+      { label: "All tasks", href: "/tasks/all", icon: "tasks", ready: true },
+    ],
+  },
   {
     title: "Sales", dot: "#666CFF",
     items: [
