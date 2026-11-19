@@ -1,0 +1,114 @@
+import { z } from "zod";
+import { isoDate, optionalPlainText, optionalText, pageParams, plainText, requiredText, uuid } from "@/lib/validation";
+
+/** Fixed: code depends on these values and the database checks them. */
+export const TASK_STATUSES = ["open", "in_progress", "waiting", "done", "cancelled"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+/** A task in one of these is still on someone's plate; done and cancelled tasks are closed. */
+export const ACTIVE_STATUSES = ["open", "in_progress", "waiting"] as const satisfies readonly TaskStatus[];
+
+/** The records an auto-raised task can point back to. */
+export const SOURCE_TYPES = ["demo_request", "invoice", "license", "sale_milestone"] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
+
+// ---- Building blocks ----
+
+/** A date and time as the client sends it (ISO 8601). Whether it is in the future is the service's call, with its clock. */
+const dateTime = z
+  .string()
+  .trim()
+  .refine((s) => Number.isFinite(Date.parse(s)), "Use a valid date and time");
+
+/** An empty form field means "nothing", for fields that can be cleared. */
+const blankToNull = (v: unknown) => (v === "" ? null : v);
+
+const optionalId = z.preprocess(blankToNull, uuid.nullable()).optional();
+
+/** Free text that keeps its line breaks; only NUL bytes (which Postgres refuses in text) are removed. */
+const stripNul = (v: unknown) => (typeof v === "string" ? v.replace(/\u0000/g, "") : v);
+
+const noteText = z.preprocess(stripNul, requiredText("Note", 2000));
+
+// ---- Create and edit ----
+
+const taskFields = {
+  title: plainText("Title", 200),
+  description: z.preprocess(stripNul, optionalText(5000)).optional(),
+  categoryId: uuid,
+  priorityId: uuid,
+  ownerId: optionalId,
+  clientId: optionalId,
+  dueDate: z.preprocess(blankToNull, isoDate.nullable()).optional(),
+  followUpAt: z.preprocess(blankToNull, dateTime.nullable()).optional(),
+  followUpEveryDays: z.preprocess(blankToNull, z.number().int().min(1).max(365).nullable()).optional(),
+};
+
+/** Fields not listed here (status, origin, source, creator) cannot be set by the caller: they are ignored. */
+export const createTaskSchema = z.object(taskFields);
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+
+/** Only the fields that are sent change; a blank owner, client, date, time or description clears it. */
+export const updateTaskSchema = z
+  .object(taskFields)
+  .partial()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "Nothing to update" });
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+
+// ---- Acting on a task ----
+
+/** Waiting must say when to look again, or the task would be parked and forgotten (the database refuses it too). */
+export const taskStatusSchema = z
+  .object({
+    status: z.enum(TASK_STATUSES),
+    waitingOn: optionalPlainText(200),
+    followUpAt: z.preprocess((v) => (v === "" ? undefined : v), dateTime).optional(),
+  })
+  .refine((v) => v.status !== "waiting" || v.followUpAt !== undefined, {
+    message: "Say when to look at it again",
+    path: ["followUpAt"],
+  });
+export type TaskStatusInput = z.infer<typeof taskStatusSchema>;
+
+/** What happens after a follow-up is recorded: chase again in N days or at a time, keep the task's cadence, or stop chasing. */
+export const followUpSchema = z.object({
+  note: noteText,
+  next: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("in_days"), days: z.number().int().min(1).max(365) }),
+    z.object({ kind: z.literal("at"), at: dateTime }),
+    z.object({ kind: z.literal("cadence") }),
+    z.object({ kind: z.literal("stop") }),
+  ]),
+});
+export type FollowUpInput = z.infer<typeof followUpSchema>;
+
+/** Park the task until a time, without counting a follow-up. */
+export const snoozeSchema = z.object({ until: dateTime });
+export type SnoozeInput = z.infer<typeof snoozeSchema>;
+
+export const noteSchema = z.object({ note: noteText });
+export type NoteInput = z.infer<typeof noteSchema>;
+
+// ---- Reading ----
+
+/** `status` also takes the groups: `active` (open, in progress, waiting) and `closed` (done, cancelled). `scope=all` needs `tasks.view_all`; the service checks. */
+export const listTasksSchema = pageParams.extend({
+  status: z.enum(["active", "closed", ...TASK_STATUSES]).default("active"),
+  categoryId: uuid.optional(),
+  priorityId: uuid.optional(),
+  ownerId: z.union([z.literal("unassigned"), uuid]).optional(),
+  clientId: uuid.optional(),
+  origin: z.enum(["manual", "auto"]).optional(),
+  dueFrom: isoDate.optional(),
+  dueTo: isoDate.optional(),
+  scope: z.enum(["mine", "all"]).default("mine"),
+  sort: z.enum(["due", "priority", "created", "updated"]).default("due"),
+  dir: z.enum(["asc", "desc"]).default("asc"),
+});
+export type ListTasksParams = z.infer<typeof listTasksSchema>;
+
+/** Whose tasks the Desk shows: the viewer's own, everyone's, the unassigned ones, or one person's. */
+export const deskQuerySchema = z.object({
+  owner: z.union([z.enum(["me", "all", "unassigned"]), uuid]).default("me"),
+});
+export type DeskQuery = z.infer<typeof deskQuerySchema>;

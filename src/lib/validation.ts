@@ -48,6 +48,24 @@ export const pageParams = z.object({
   search: z.string().trim().max(100).optional(),
 });
 
+/** Control characters become spaces (a NUL byte would make Postgres refuse the row); runs of spaces collapse; ends are trimmed. */
+export const cleanText = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+
+export const plainText = (label: string, max: number) =>
+  z
+    .string({ error: `${label} is required` })
+    .transform(cleanText)
+    .pipe(z.string().min(1, `${label} is required`).max(max, `${label} can be at most ${max} characters`));
+
+/** Free text that may be left out: blank becomes undefined. */
+export const optionalPlainText = (max: number) =>
+  z
+    .string()
+    .transform(cleanText)
+    .pipe(z.string().max(max))
+    .transform((s) => s || undefined)
+    .optional();
+
 /** Escape % and _ so user input is matched literally by ILIKE. */
 export const likePattern = (s: string) => `%${s.replace(/[\\%_]/g, "\\$&")}%`;
 
