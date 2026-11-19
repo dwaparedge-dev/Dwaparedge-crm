@@ -109,8 +109,12 @@ export type NoteInput = z.infer<typeof noteSchema>;
 
 // ---- Reading ----
 
-/** `status` also takes the groups: `active` (open, in progress, waiting) and `closed` (done, cancelled). `scope=all` needs `tasks.view_all`; the service checks. */
+/**
+ * `status` also takes the groups: `active` (open, in progress, waiting) and `closed` (done, cancelled). `scope=all` needs `tasks.view_all`; the service checks.
+ * `search` is cleaned like any other text (a NUL would make Postgres refuse the query); % and _ stay as typed and the service matches them literally.
+ */
 export const listTasksSchema = pageParams.extend({
+  search: optionalPlainText(100),
   status: z.enum(["active", "closed", ...TASK_STATUSES]).default("active"),
   categoryId: uuid.optional(),
   priorityId: uuid.optional(),

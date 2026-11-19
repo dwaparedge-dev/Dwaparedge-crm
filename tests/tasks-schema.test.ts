@@ -284,6 +284,14 @@ describe("list tasks", () => {
     expect(listTasksSchema.parse({ search: "  raj  " }).search).toBe("raj");
   });
 
+  it("cleans NUL bytes and control characters out of the search, keeps % and _ as typed, and drops a blank one", () => {
+    // A NUL in a query parameter makes Postgres refuse the whole query, so it must never reach the database.
+    expect(listTasksSchema.parse({ search: "100%_\u0000 Raj\u0007\tNow" }).search).toBe("100%_ Raj Now");
+    expect(listTasksSchema.parse({ search: " \u0000\n\t " }).search).toBeUndefined();
+    expect(listTasksSchema.parse({ search: "" }).search).toBeUndefined();
+    expect(listTasksSchema.safeParse({ search: "x".repeat(101) }).success).toBe(false);
+  });
+
   it("filters by active, closed or any one status, and nothing else", () => {
     for (const status of ["active", "closed", ...TASK_STATUSES]) expect(listTasksSchema.parse({ status }).status).toBe(status);
     expect(listTasksSchema.safeParse({ status: "all" }).success).toBe(false);

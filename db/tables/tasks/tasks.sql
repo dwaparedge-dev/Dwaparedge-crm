@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS tasks_owner_status_due_idx ON tasks (owner_id, status, due_date) WHERE status IN ('open','in_progress','waiting');
 CREATE INDEX IF NOT EXISTS tasks_follow_up_idx ON tasks (follow_up_at) WHERE status IN ('open','in_progress','waiting') AND follow_up_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS tasks_category_idx ON tasks (category_id);
+CREATE INDEX IF NOT EXISTS tasks_priority_idx ON tasks (priority_id);
 CREATE INDEX IF NOT EXISTS tasks_client_idx ON tasks (client_id);
 CREATE INDEX IF NOT EXISTS tasks_source_idx ON tasks (source_type, source_id);
 -- The sync's idempotency: running it twice, or from two tabs at once, can never create a second task for the same condition.
