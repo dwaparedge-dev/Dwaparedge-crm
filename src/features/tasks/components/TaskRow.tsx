@@ -14,7 +14,7 @@ import PersonAddIcon from "@mui/icons-material/PersonAddAlt1Outlined";
 import type { CurrentUserValue } from "@/components/layout/CurrentUserContext";
 import { daysUntil } from "@/lib/dates";
 import { dueText, followUpsText, formatWhen } from "../display";
-import { canAssign, canEditTask } from "../policy";
+import { canAssign, canEditRow } from "../policy";
 import type { TaskRow as TaskData } from "../queries";
 import { isFollowUpDue, isStuck, type Section } from "../sections";
 import { CategoryChip, PriorityChip, STATUS_LABEL } from "./common";
@@ -45,7 +45,7 @@ export function TaskRow({ task: t, section, today, now, user, showCategory, busy
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const closeMenu = () => setAnchor(null);
 
-  const canEdit = canEditTask(user, { ownerId: t.owner_id, ownerActive: t.owner_id !== null, createdBy: t.created_by });
+  const canEdit = canEditRow(user, t);
   const canTake = t.owner_id === null && canAssign(user);
   const late = t.due_date !== null && daysUntil(t.due_date, today) < 0;
   const followUpDue = isFollowUpDue({ status: t.status, dueDate: t.due_date, followUpAt: t.follow_up_at }, now);

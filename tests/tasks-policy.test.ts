@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canAssign,
+  canEditRow,
   canEditTask,
   canManageTaskSettings,
   canViewAll,
@@ -250,5 +251,46 @@ describe("scopeSql", () => {
   it("rejects a startParam that is not a positive integer", () => {
     expect(() => scopeSql(userWith(), "t", 0)).toThrow("startParam");
     expect(() => scopeSql(userWith(), "t", 1.5)).toThrow("startParam");
+  });
+});
+
+describe("canEditRow", () => {
+  // A TaskRow from TASK_SELECT already reads a deactivated owner as no owner, so owner_id null covers that case too.
+  const row = (ownerId: string | null, createdBy: string | null) => ({ owner_id: ownerId, created_by: createdBy });
+
+  it("lets the owner edit", () => {
+    expect(canEditRow(userWith(), row(ME, OTHER))).toBe(true);
+  });
+
+  it("lets the creator edit a task they gave to someone else", () => {
+    expect(canEditRow(userWith(), row(OTHER, ME))).toBe(true);
+  });
+
+  it("lets a holder of tasks.edit_all edit anyone's task", () => {
+    expect(canEditRow(userWith("tasks.edit_all"), row(OTHER, THIRD))).toBe(true);
+  });
+
+  it("does not let a user with no permissions edit someone else's task", () => {
+    expect(canEditRow(userWith(), row(OTHER, THIRD))).toBe(false);
+  });
+
+  it("does not let tasks.view_all, tasks.assign or tasks.manage_settings edit someone else's task", () => {
+    expect(canEditRow(userWith("tasks.view_all", "tasks.assign", "tasks.manage_settings"), row(OTHER, THIRD))).toBe(false);
+  });
+
+  it("reads a null owner as unassigned: only the creator or tasks.edit_all may edit", () => {
+    expect(canEditRow(userWith(), row(null, OTHER))).toBe(false);
+    expect(canEditRow(userWith(), row(null, ME))).toBe(true);
+    expect(canEditRow(userWith(), row(null, null))).toBe(false);
+    expect(canEditRow(userWith("tasks.edit_all"), row(null, OTHER))).toBe(true);
+  });
+
+  it("agrees with canEditTask for the same task", () => {
+    for (const held of [[], ["tasks.edit_all"]] as Permission[][]) {
+      const u = userWith(...held);
+      for (const [ownerId, createdBy] of [[ME, OTHER], [OTHER, ME], [OTHER, THIRD], [null, OTHER], [null, ME], [OTHER, null]] as const) {
+        expect(canEditRow(u, row(ownerId, createdBy))).toBe(canEditTask(u, { ownerId, ownerActive: ownerId !== null, createdBy }));
+      }
+    }
   });
 });

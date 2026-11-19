@@ -22,7 +22,7 @@ import { useFetch } from "@/components/common/useFetch";
 import { useCurrentUser } from "@/components/layout/CurrentUserContext";
 import { ApiError, api } from "@/lib/api-client";
 import { dueText, followUpsText, formatWhen, shortDate, sourceLink } from "../display";
-import { canEditTask } from "../policy";
+import { canEditRow } from "../policy";
 import type { TaskRow } from "../queries";
 import type { TaskEventRow } from "../service";
 import { announceTasksChanged } from "../useDeskCounts";
@@ -72,7 +72,7 @@ function NoteBox({ taskId, onAdded }: { taskId: string; onAdded: () => void }) {
 
 function Details({ task: t, today, onNoteAdded }: { task: TaskDetail; today: string; onNoteAdded: () => void }) {
   const user = useCurrentUser();
-  const canEdit = canEditTask(user, { ownerId: t.owner_id, ownerActive: t.owner_id !== null, createdBy: t.created_by });
+  const canEdit = canEditRow(user, t);
   const source = sourceLink(t.source_type, t.source_id);
 
   return (

@@ -2,6 +2,7 @@
 // Pure on purpose: no database, no `server-only`, so it is unit-testable and the services just ask it.
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { hasPermission } from "@/lib/auth/permissions";
+import type { TaskRow } from "./queries";
 
 /** The fields of a task the policy needs; ownerActive comes from joining the owner's user row. */
 export interface TaskAccess {
@@ -24,6 +25,13 @@ export const canViewTask = (u: CurrentUser, t: TaskAccess): boolean => canViewAl
 /** Editing, completing, following up and noting all follow this one rule. */
 export const canEditTask = (u: CurrentUser, t: TaskAccess): boolean =>
   hasPermission(u.permissions, "tasks.edit_all") || ownsOrCreated(u, t);
+
+/**
+ * `canEditTask` for a task as the screens hold it. TASK_SELECT already reads a deactivated owner as no owner
+ * (`owner_id` is null), so an inactive owner counts as unassigned here without being asked: the rule lives in this one place.
+ */
+export const canEditRow = (u: CurrentUser, row: Pick<TaskRow, "owner_id" | "created_by">): boolean =>
+  canEditTask(u, { ownerId: row.owner_id, ownerActive: row.owner_id !== null, createdBy: row.created_by });
 
 /** Give a task to someone else, or take an unassigned one. */
 export const canAssign = (u: CurrentUser): boolean => hasPermission(u.permissions, "tasks.assign");
