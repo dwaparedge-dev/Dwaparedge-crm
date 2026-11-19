@@ -22,14 +22,14 @@ export interface TaskEventRow {
 
 /** Follow-up times must be in the future and at most this many days out. */
 const MAX_FOLLOW_UP_DAYS = 365;
-const DAY_MS = 86_400_000;
+export const DAY_MS = 86_400_000;
 
 const CLOSED_STATUSES = ["done", "cancelled"] as const satisfies readonly TaskStatus[];
 
 const STATUS_LABEL: Record<TaskStatus, string> = { open: "Open", in_progress: "In progress", waiting: "Waiting", done: "Done", cancelled: "Cancelled" };
 
 const notFound = () => new AppError("Task not found", 404, "NOT_FOUND");
-const invalid = (message: string) => new AppError(message, 422, "VALIDATION_ERROR");
+export const invalid = (message: string) => new AppError(message, 422, "VALIDATION_ERROR");
 
 /**
  * A follow-up time someone chose, checked against `now`: in the future and at most 365 days out. Returns it as an ISO string
@@ -101,7 +101,7 @@ function assertCanEdit(actor: CurrentUser, t: LockedTask) {
  * Locks the task for a change by `actor`. A task they may not see is 404, as if it did not exist. With `"edit"`, one they
  * may see but not change is 403; `"view"` leaves the rest to the caller (giving a task away needs view and assign, not edit).
  */
-async function lockForChange(tx: Queryable, id: string, actor: CurrentUser, need: "view" | "edit"): Promise<LockedTask> {
+export async function lockForChange(tx: Queryable, id: string, actor: CurrentUser, need: "view" | "edit"): Promise<LockedTask> {
   const { rows } = await tx.query<LockedTask>(
     `SELECT t.title, t.description, t.category_id, t.priority_id, t.client_id, to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
             ${isoTime("t.follow_up_at")} AS follow_up_at, t.follow_up_every_days, t.status, t.owner_id,
@@ -268,8 +268,11 @@ export async function setTaskStatus(id: string, input: TaskStatusInput, actor: C
     // Who it is waiting on only means something while it is waiting.
     const waitingOn = input.status === "waiting" ? (input.waitingOn ?? null) : null;
     // The return time belongs to the wait: when work resumes (the reply came) it goes, so the task is back on the list at
-    // once. A time given with the move wins; a time on a task that was not waiting, or one being closed, stays as it was.
-    const workResumes = cur.status === "waiting" && (input.status === "open" || input.status === "in_progress");
+    // once. Reopening a done or cancelled task drops it too: that schedule belongs to the task's earlier life, and kept, it
+    // could bring the task back parked and off the Desk. A time given with the move wins; a time on an open or in-progress
+    // task, or on one being closed, stays as it was.
+    const toWork = input.status === "open" || input.status === "in_progress";
+    const workResumes = toWork && (cur.status === "waiting" || cur.status === "done" || cur.status === "cancelled");
 
     await tx.query(
       `UPDATE tasks SET status = $1, waiting_on = $3,
