@@ -18,10 +18,12 @@ interface Props {
   error?: string;
   /** Marks the field required (the default). Pass false where a client is optional. */
   required?: boolean;
+  /** `small` for a filter bar, where the other controls are small. */
+  size?: "small" | "medium";
 }
 
 /** Searchable client selector (server-side search, active clients only). */
-export function ClientPicker({ value, onChange, disabled, error, required = true }: Props) {
+export function ClientPicker({ value, onChange, disabled, error, required = true, size = "medium" }: Props) {
   const [options, setOptions] = useState<ClientOption[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,6 +55,7 @@ export function ClientPicker({ value, onChange, disabled, error, required = true
       options={selected && !options.some((o) => o.id === selected.id) ? [selected, ...options] : options}
       value={selected}
       loading={loading}
+      size={size}
       disabled={disabled}
       filterOptions={(x) => x}
       getOptionLabel={(o) => o.display_name}

@@ -15,6 +15,7 @@ import Skeleton from "@mui/material/Skeleton";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import CloseIcon from "@mui/icons-material/Close";
+import ReplayIcon from "@mui/icons-material/Replay";
 import { InfoBox, SectionLabel } from "@/components/common/InfoBox";
 import { useNotify } from "@/components/common/Notify";
 import { EmptyState, ErrorState } from "@/components/common/states";
@@ -70,9 +71,42 @@ function NoteBox({ taskId, onAdded }: { taskId: string; onAdded: () => void }) {
   );
 }
 
-function Details({ task: t, today, onNoteAdded }: { task: TaskDetail; today: string; onNoteAdded: () => void }) {
+/**
+ * Bring a done or cancelled task back to Open. The server clears who completed it and when. This is the only change the panel
+ * offers on a closed task (a note can still be added); to edit it, reopen it first.
+ */
+function ReopenButton({ task, onReopened }: { task: TaskDetail; onReopened: () => void }) {
+  const notify = useNotify();
+  const [busy, setBusy] = useState(false);
+
+  async function reopen() {
+    setBusy(true);
+    try {
+      await api(`/api/tasks/${task.id}/status`, { method: "POST", body: { status: "open" } });
+      notify.success("Task reopened");
+      announceTasksChanged();
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : "Could not reopen the task");
+    } finally {
+      setBusy(false);
+      // Also after a failure: another tab may have changed the task, and the panel should show what is true now.
+      onReopened();
+    }
+  }
+
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Button id="task-reopen" variant="outlined" size="small" startIcon={<ReplayIcon />} disabled={busy} onClick={reopen} aria-label={`Reopen: ${task.title}`}>
+        {busy ? "Reopening…" : "Reopen"}
+      </Button>
+    </Box>
+  );
+}
+
+function Details({ task: t, today, onNoteAdded, onReopened }: { task: TaskDetail; today: string; onNoteAdded: () => void; onReopened: () => void }) {
   const user = useCurrentUser();
   const canEdit = canEditRow(user, t);
+  const closed = t.status === "done" || t.status === "cancelled";
   const source = sourceLink(t.source_type, t.source_id);
 
   return (
@@ -83,6 +117,8 @@ function Details({ task: t, today, onNoteAdded }: { task: TaskDetail; today: str
         <CategoryChip name={t.category_name} colour={t.category_colour} />
         {t.origin === "auto" && <Chip size="small" variant="outlined" label="auto" />}
       </Box>
+
+      {canEdit && closed && <ReopenButton task={t} onReopened={onReopened} />}
 
       {t.description && <Typography sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", mb: 2 }}>{t.description}</Typography>}
 
@@ -125,8 +161,16 @@ function Details({ task: t, today, onNoteAdded }: { task: TaskDetail; today: str
   );
 }
 
-/** A task's fields and timeline in a side panel, with a box to add a note. Mount it with `key={taskId}` so one task never shows another's data. */
-export function TaskDetailPanel({ taskId, today, onClose }: { taskId: string; today: string; onClose: () => void }) {
+interface PanelProps {
+  taskId: string;
+  today: string;
+  onClose: () => void;
+  /** Called after the task was changed from the panel (reopened), so the list behind it can read itself again. */
+  onChanged?: () => void;
+}
+
+/** A task's fields and timeline in a side panel, with a box to add a note and Reopen on a closed task. Mount it with `key={taskId}` so one task never shows another's data. */
+export function TaskDetailPanel({ taskId, today, onClose, onChanged }: PanelProps) {
   const { data, error, reload } = useFetch<TaskDetail>(`/api/tasks/${taskId}`);
 
   return (
@@ -142,7 +186,7 @@ export function TaskDetailPanel({ taskId, today, onClose }: { taskId: string; to
       </Box>
       <Box sx={{ px: 2.5, py: 2, overflowY: "auto" }}>
         {data ? (
-          <Details task={data} today={today} onNoteAdded={reload} />
+          <Details task={data} today={today} onNoteAdded={reload} onReopened={() => { reload(); onChanged?.(); }} />
         ) : error ? (
           <ErrorState message={error} onRetry={reload} />
         ) : (

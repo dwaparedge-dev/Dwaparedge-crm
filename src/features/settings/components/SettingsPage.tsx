@@ -19,10 +19,13 @@ import { useNotify } from "@/components/common/Notify";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ErrorState } from "@/components/common/states";
 import { useFetch } from "@/components/common/useFetch";
+import { useCurrentUser } from "@/components/layout/CurrentUserContext";
 import { ApiError, api } from "@/lib/api-client";
 import { INDIAN_STATES } from "@/lib/india";
 import { GSTIN_RE, PAN_RE, panFromGstin } from "@/lib/validation";
 import { OptionsManager } from "@/features/options/components/OptionsManager";
+import { TaskConfigManager } from "@/features/tasks/components/TaskConfigManager";
+import { canManageTaskSettings } from "@/features/tasks/policy";
 import type { CompanySettings } from "../service";
 
 interface Values {
@@ -151,17 +154,29 @@ function SettingsForm({ initial, onSaved }: { initial: Values; onSaved: () => vo
   );
 }
 
+type Tab = "company" | "options" | "task-categories" | "task-priorities";
+
 export function SettingsPage() {
+  const user = useCurrentUser();
   const { data, error, loading, reload } = useFetch<CompanySettings>("/api/settings");
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState<Tab>("company");
+  // The task tabs are for someone who may change them. This only hides them; the server checks on every change.
+  const taskTabs = canManageTaskSettings(user);
   return (
     <>
       <PageHeader title="Settings" crumbs={[{ label: "Dashboard", href: "/" }, { label: "Settings" }]} />
-      <Tabs value={tab} onChange={(_, v: number) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Company & invoices" />
-        <Tab label="Dropdown options" />
+      <Tabs value={tab} onChange={(_, v: Tab) => setTab(v)} sx={{ mb: 2 }} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>
+        <Tab value="company" label="Company & invoices" />
+        <Tab value="options" label="Dropdown options" />
+        {taskTabs && <Tab value="task-categories" label="Task categories" />}
+        {taskTabs && <Tab value="task-priorities" label="Task priorities" />}
       </Tabs>
-      {tab === 1 ? <OptionsManager /> : error ? <ErrorState message={error} onRetry={reload} /> : loading || !data ? <Skeleton variant="rounded" height={420} /> : <SettingsForm key={data.updated_at} initial={toValues(data)} onSaved={reload} />}
+      {tab === "options" ? <OptionsManager />
+        : tab === "task-categories" ? <TaskConfigManager kind="categories" />
+        : tab === "task-priorities" ? <TaskConfigManager kind="priorities" />
+        : error ? <ErrorState message={error} onRetry={reload} />
+        : loading || !data ? <Skeleton variant="rounded" height={420} />
+        : <SettingsForm key={data.updated_at} initial={toValues(data)} onSaved={reload} />}
     </>
   );
 }
