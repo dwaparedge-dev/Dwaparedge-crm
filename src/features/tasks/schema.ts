@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDate, optionalPlainText, optionalText, pageParams, plainText, requiredText, uuid } from "@/lib/validation";
+import { optionalPlainText, optionalText, pageParams, plainText, requiredText, uuid } from "@/lib/validation";
 
 /** Fixed: code depends on these values and the database checks them. */
 export const TASK_STATUSES = ["open", "in_progress", "waiting", "done", "cancelled"] as const;
@@ -14,11 +14,28 @@ export type SourceType = (typeof SOURCE_TYPES)[number];
 
 // ---- Building blocks ----
 
-/** A date and time as the client sends it (ISO 8601). Whether it is in the future is the service's call, with its clock. */
-const dateTime = z
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** A day that exists: `Date.parse` alone lets 2026-02-30 through (it rolls over to March), and Postgres then refuses it. */
+const isCalendarDate = (s: string) => {
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s && !s.startsWith("0000"); // Postgres has no year 0
+};
+
+/** `YYYY-MM-DD`, and a day that exists. */
+const taskDate = z.string().refine((s) => DATE_RE.test(s) && isCalendarDate(s), "Use a valid date (YYYY-MM-DD)");
+
+/**
+ * An ISO 8601 date and time with an explicit offset or Z, so a time is never ambiguous (the server is not in India).
+ * Whether it is in the future is the service's call, with its clock.
+ */
+const taskDateTime = z
   .string()
-  .trim()
-  .refine((s) => Number.isFinite(Date.parse(s)), "Use a valid date and time");
+  .refine(
+    (s) => DATE_TIME_RE.test(s) && isCalendarDate(s.slice(0, 10)) && Number.isFinite(Date.parse(s)),
+    "Use a date and time with a time zone, like 2026-11-20T10:00:00+05:30",
+  );
 
 /** An empty form field means "nothing", for fields that can be cleared. */
 const blankToNull = (v: unknown) => (v === "" ? null : v);
@@ -39,8 +56,8 @@ const taskFields = {
   priorityId: uuid,
   ownerId: optionalId,
   clientId: optionalId,
-  dueDate: z.preprocess(blankToNull, isoDate.nullable()).optional(),
-  followUpAt: z.preprocess(blankToNull, dateTime.nullable()).optional(),
+  dueDate: z.preprocess(blankToNull, taskDate.nullable()).optional(),
+  followUpAt: z.preprocess(blankToNull, taskDateTime.nullable()).optional(),
   followUpEveryDays: z.preprocess(blankToNull, z.number().int().min(1).max(365).nullable()).optional(),
 };
 
@@ -62,7 +79,7 @@ export const taskStatusSchema = z
   .object({
     status: z.enum(TASK_STATUSES),
     waitingOn: optionalPlainText(200),
-    followUpAt: z.preprocess((v) => (v === "" ? undefined : v), dateTime).optional(),
+    followUpAt: z.preprocess((v) => (v === "" ? undefined : v), taskDateTime).optional(),
   })
   .refine((v) => v.status !== "waiting" || v.followUpAt !== undefined, {
     message: "Say when to look at it again",
@@ -75,7 +92,7 @@ export const followUpSchema = z.object({
   note: noteText,
   next: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("in_days"), days: z.number().int().min(1).max(365) }),
-    z.object({ kind: z.literal("at"), at: dateTime }),
+    z.object({ kind: z.literal("at"), at: taskDateTime }),
     z.object({ kind: z.literal("cadence") }),
     z.object({ kind: z.literal("stop") }),
   ]),
@@ -83,7 +100,7 @@ export const followUpSchema = z.object({
 export type FollowUpInput = z.infer<typeof followUpSchema>;
 
 /** Park the task until a time, without counting a follow-up. */
-export const snoozeSchema = z.object({ until: dateTime });
+export const snoozeSchema = z.object({ until: taskDateTime });
 export type SnoozeInput = z.infer<typeof snoozeSchema>;
 
 export const noteSchema = z.object({ note: noteText });
@@ -99,8 +116,8 @@ export const listTasksSchema = pageParams.extend({
   ownerId: z.union([z.literal("unassigned"), uuid]).optional(),
   clientId: uuid.optional(),
   origin: z.enum(["manual", "auto"]).optional(),
-  dueFrom: isoDate.optional(),
-  dueTo: isoDate.optional(),
+  dueFrom: taskDate.optional(),
+  dueTo: taskDate.optional(),
   scope: z.enum(["mine", "all"]).default("mine"),
   sort: z.enum(["due", "priority", "created", "updated"]).default("due"),
   dir: z.enum(["asc", "desc"]).default("asc"),

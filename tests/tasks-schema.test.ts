@@ -287,6 +287,69 @@ describe("list tasks", () => {
   });
 });
 
+describe("strict dates and times", () => {
+  const BAD_DATES = ["2026-02-30", "0000-01-01", "2026-13-01", "2026-00-10", "2026-11-31", "2026-4-5", "20261120", "tomorrow", "2026-11-20T10:00:00Z", " 2026-11-20", ""];
+  const BAD_TIMES = [
+    "1",
+    "tomorrow-ish",
+    "2026-11-20 10:00",
+    "2026-11-20T10:00",
+    "2026-11-20T10:00:00",
+    "2026-11-20T10:00:00.123",
+    "2026-02-30T10:00:00Z",
+    "2026-13-01T10:00:00Z",
+    "2026-11-20T25:00:00Z",
+    "2026-11-20",
+    "",
+  ];
+  const GOOD_TIMES = ["2026-11-20T10:00:00Z", "2026-11-20T10:00:00+05:30", "2026-11-20T10:00Z", "2026-11-20T10:00:00.5Z", "2026-11-20T10:00:00.123-08:00"];
+
+  it("dueDate accepts a real calendar day and refuses an impossible one, naming dueDate", () => {
+    expect(createTaskSchema.parse({ ...base, dueDate: "2026-11-20" }).dueDate).toBe("2026-11-20");
+    expect(createTaskSchema.parse({ ...base, dueDate: "2028-02-29" }).dueDate).toBe("2028-02-29"); // a leap day
+    for (const dueDate of BAD_DATES.filter((d) => d !== "")) {
+      const r = createTaskSchema.safeParse({ ...base, dueDate });
+      expect(r.success, dueDate).toBe(false);
+      expect(failedPaths(r), dueDate).toEqual(["dueDate"]);
+    }
+    expect(createTaskSchema.safeParse({ ...base, dueDate: "2027-02-29" }).success).toBe(false); // not a leap year
+    expect(updateTaskSchema.safeParse({ dueDate: "2026-02-30" }).success).toBe(false);
+    expect(createTaskSchema.parse({ ...base, dueDate: "" }).dueDate).toBeNull(); // blank still clears
+  });
+
+  it("the list's dueFrom and dueTo refuse an impossible day too", () => {
+    expect(listTasksSchema.parse({ dueFrom: "2026-11-01", dueTo: "2026-11-30" })).toMatchObject({ dueFrom: "2026-11-01", dueTo: "2026-11-30" });
+    for (const bad of BAD_DATES) {
+      expect(failedPaths(listTasksSchema.safeParse({ dueFrom: bad })), bad).toEqual(["dueFrom"]);
+      expect(failedPaths(listTasksSchema.safeParse({ dueTo: bad })), bad).toEqual(["dueTo"]);
+    }
+  });
+
+  it("follow-up times need a real date, a time and an explicit offset or Z", () => {
+    for (const t of GOOD_TIMES) {
+      expect(createTaskSchema.parse({ ...base, followUpAt: t }).followUpAt, t).toBe(t);
+      expect(snoozeSchema.parse({ until: t }).until, t).toBe(t);
+      expect(followUpSchema.safeParse({ note: "x", next: { kind: "at", at: t } }).success, t).toBe(true);
+      expect(taskStatusSchema.safeParse({ status: "waiting", followUpAt: t }).success, t).toBe(true);
+    }
+    for (const t of BAD_TIMES.filter((x) => x !== "")) {
+      expect(failedPaths(createTaskSchema.safeParse({ ...base, followUpAt: t })), t).toEqual(["followUpAt"]);
+      expect(failedPaths(updateTaskSchema.safeParse({ followUpAt: t })), t).toEqual(["followUpAt"]);
+      expect(failedPaths(snoozeSchema.safeParse({ until: t })), t).toEqual(["until"]);
+      expect(failedPaths(followUpSchema.safeParse({ note: "x", next: { kind: "at", at: t } })), t).toEqual(["next.at"]);
+      expect(taskStatusSchema.safeParse({ status: "waiting", followUpAt: t }).success, t).toBe(false);
+    }
+    for (const t of BAD_TIMES) expect(snoozeSchema.safeParse({ until: t }).success, t).toBe(false);
+  });
+
+  it("waiting still needs a follow-up time, and a malformed one does not satisfy it", () => {
+    expect(failedPaths(taskStatusSchema.safeParse({ status: "waiting" }))).toEqual(["followUpAt"]);
+    expect(failedPaths(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "" }))).toEqual(["followUpAt"]);
+    expect(taskStatusSchema.safeParse({ status: "waiting", followUpAt: "2026-11-20T10:00" }).success).toBe(false);
+    expect(taskStatusSchema.parse({ status: "done" })).toEqual({ status: "done" });
+  });
+});
+
 describe("desk query", () => {
   it("shows my tasks unless told otherwise", () => {
     expect(deskQuerySchema.parse({})).toEqual({ owner: "me" });
