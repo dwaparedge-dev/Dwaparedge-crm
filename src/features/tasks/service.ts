@@ -4,7 +4,7 @@ import { logActivity } from "@/lib/activity";
 import { AppError } from "@/lib/auth/errors";
 import type { CurrentUser } from "@/lib/auth/current-user";
 import { likePattern } from "@/lib/validation";
-import { canAssign, canEditTask, canViewAll, canViewTask, scopeSql, type TaskAccess } from "./policy";
+import { canAssign, canEditTask, canViewAll, canViewTask, effectiveOwner, scopeSql, type TaskAccess } from "./policy";
 import { isoTime, TASK_SELECT, type TaskRow } from "./queries";
 import { ACTIVE_STATUSES, type CreateTaskInput, type ListTasksParams, type NoteInput, type TaskStatus, type TaskStatusInput, type UpdateTaskInput } from "./schema";
 
@@ -93,8 +93,15 @@ type LockedTask = {
 
 const accessOf = (t: LockedTask): TaskAccess => ({ ownerId: t.owner_id, ownerActive: t.owner_active, createdBy: t.created_by });
 
-/** Locks the task for a change by `actor`: 404 when they may not see it, 403 when they may see it but not change it. */
-async function lockForChange(tx: Queryable, id: string, actor: CurrentUser): Promise<LockedTask> {
+function assertCanEdit(actor: CurrentUser, t: LockedTask) {
+  if (!canEditTask(actor, accessOf(t))) throw new AppError("You can only change tasks you own or created", 403, "FORBIDDEN");
+}
+
+/**
+ * Locks the task for a change by `actor`. A task they may not see is 404, as if it did not exist. With `"edit"`, one they
+ * may see but not change is 403; `"view"` leaves the rest to the caller (giving a task away needs view and assign, not edit).
+ */
+async function lockForChange(tx: Queryable, id: string, actor: CurrentUser, need: "view" | "edit"): Promise<LockedTask> {
   const { rows } = await tx.query<LockedTask>(
     `SELECT t.title, t.description, t.category_id, t.priority_id, t.client_id, to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
             ${isoTime("t.follow_up_at")} AS follow_up_at, t.follow_up_every_days, t.status, t.owner_id,
@@ -106,7 +113,7 @@ async function lockForChange(tx: Queryable, id: string, actor: CurrentUser): Pro
   );
   const cur = rows[0];
   if (!cur || !canViewTask(actor, accessOf(cur))) throw notFound();
-  if (!canEditTask(actor, accessOf(cur))) throw new AppError("You can only change tasks you own or created", 403, "FORBIDDEN");
+  if (need === "edit") assertCanEdit(actor, cur);
   return cur;
 }
 
@@ -178,10 +185,12 @@ const EDIT_FIELDS = [
 /**
  * Only what is sent changes, and only what actually changes is checked and logged: a form that sends back a hidden category
  * or a follow-up time that has since passed is fine as long as it is unchanged. Nothing changed, nothing written.
+ * Changing the owner needs tasks.assign and sight of the task ("Take it" on an unassigned one); changing anything else needs
+ * the edit right. An edit that does both needs both, and is refused whole if either is missing.
  */
 export async function updateTask(id: string, input: UpdateTaskInput, actor: CurrentUser, now: Date = new Date()): Promise<void> {
   await db.transaction(async (tx) => {
-    const cur = await lockForChange(tx, id, actor);
+    const cur = await lockForChange(tx, id, actor, "view");
     const before: Record<string, unknown> = cur;
     // Times are compared as instants, so the same moment written with another offset is not a change.
     const after: Record<string, unknown> = { ...input, followUpAt: input.followUpAt ? new Date(input.followUpAt).toISOString() : input.followUpAt };
@@ -197,9 +206,12 @@ export async function updateTask(id: string, input: UpdateTaskInput, actor: Curr
       values.push(after[field]);
       sets.push(`${column} = $${values.length}`);
     }
-    const ownerChanged = input.ownerId !== undefined && input.ownerId !== cur.owner_id;
+    // Compared with the owner the screens show: a deactivated owner reads as none, so a form saved unchanged is not a reassignment.
+    const ownerChanged = input.ownerId !== undefined && input.ownerId !== effectiveOwner(accessOf(cur));
     if (!sets.length && !ownerChanged) return;
 
+    // Both rights are checked before anything is written.
+    if (sets.length) assertCanEdit(actor, cur);
     if (ownerChanged && !canAssign(actor)) throw new AppError("You do not have permission to give tasks to other people", 403, "FORBIDDEN");
     const ownerName = ownerChanged && input.ownerId ? await activeUserName(tx, input.ownerId) : null;
     if (changes.categoryId) await activeCategory(tx, input.categoryId!);
@@ -244,7 +256,7 @@ export async function updateTask(id: string, input: UpdateTaskInput, actor: Curr
  */
 export async function setTaskStatus(id: string, input: TaskStatusInput, actor: CurrentUser, now: Date = new Date()): Promise<void> {
   await db.transaction(async (tx) => {
-    const cur = await lockForChange(tx, id, actor);
+    const cur = await lockForChange(tx, id, actor, "edit");
     if (cur.status === input.status) throw new AppError(`This task is already marked ${STATUS_LABEL[input.status]}`, 409, "INVALID_TRANSITION");
 
     const newFollowUpAt = input.followUpAt ? followUpTime(input.followUpAt, now) : null;
@@ -255,14 +267,18 @@ export async function setTaskStatus(id: string, input: TaskStatusInput, actor: C
     }
     // Who it is waiting on only means something while it is waiting.
     const waitingOn = input.status === "waiting" ? (input.waitingOn ?? null) : null;
+    // The return time belongs to the wait: when work resumes (the reply came) it goes, so the task is back on the list at
+    // once. A time given with the move wins; a time on a task that was not waiting, or one being closed, stays as it was.
+    const workResumes = cur.status === "waiting" && (input.status === "open" || input.status === "in_progress");
 
     await tx.query(
-      `UPDATE tasks SET status = $1, follow_up_at = COALESCE($2::timestamptz, follow_up_at), waiting_on = $3,
+      `UPDATE tasks SET status = $1, waiting_on = $3,
+              follow_up_at = CASE WHEN $2::timestamptz IS NOT NULL THEN $2::timestamptz WHEN $6::boolean THEN NULL ELSE follow_up_at END,
               completed_at = CASE WHEN $1 = 'done' THEN now() END,
               completed_by = CASE WHEN $1 = 'done' THEN $4::uuid END,
               updated_at = now()
        WHERE id = $5`,
-      [input.status, newFollowUpAt, waitingOn, actor.id, id],
+      [input.status, newFollowUpAt, waitingOn, actor.id, id, workResumes],
     );
     await logActivity(
       {
@@ -278,7 +294,7 @@ export async function setTaskStatus(id: string, input: TaskStatusInput, actor: C
 /** A note on the task's timeline. Anyone who may change the task may add one, whatever its status. */
 export async function addTaskNote(id: string, input: NoteInput, actor: CurrentUser): Promise<void> {
   await db.transaction(async (tx) => {
-    const cur = await lockForChange(tx, id, actor);
+    const cur = await lockForChange(tx, id, actor, "edit");
     await logActivity(
       {
         entityType: "task", entityId: id, clientId: cur.client_id, action: "note_added",

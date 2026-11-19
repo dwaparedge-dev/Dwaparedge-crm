@@ -287,6 +287,44 @@ describe("who may see and change a task", () => {
     expect((await get(id, nobody)).owner_id).toBeNull();
   });
 
+  it("lets a user with tasks.view_all and tasks.assign take an unassigned task and hand anyone's task on, but not edit it (403, nothing written)", async () => {
+    const dispatcher = await actor("Dispatcher", ["tasks.view_all", "tasks.assign"]);
+    const third = await actor("Third Person", []);
+
+    // "Take it" on a task nobody owns, which the dispatcher neither owns nor created.
+    const loose = await create({ title: "Nobody's yet", ownerId: null }, founder);
+    await update(loose, { ownerId: dispatcher.id }, dispatcher);
+    expect(await get(loose, dispatcher)).toMatchObject({ owner_id: dispatcher.id, owner_name: "Dispatcher" });
+    expect((await history(loose)).map((h) => [h.action, h.summary, h.actor_id, h.metadata])).toEqual([
+      ["created", 'Created task "Nobody\'s yet" (unassigned)', founder.id, null],
+      ["reassigned", 'Reassigned "Nobody\'s yet" to Dispatcher', dispatcher.id, { from: null, to: dispatcher.id }],
+    ]);
+
+    // Handing someone else's task to a third person.
+    const others = await create({ title: "Other's job", ownerId: other.id }, founder);
+    await update(others, { ownerId: third.id }, dispatcher);
+    expect((await get(others, founder)).owner_id).toBe(third.id);
+    expect((await history(others)).at(-1)).toMatchObject({
+      action: "reassigned", summary: 'Reassigned "Other\'s job" to Third Person', actor_id: dispatcher.id, metadata: { from: other.id, to: third.id },
+    });
+
+    // Changing anything else needs tasks.edit_all: alone, or together with the owner, it is refused and nothing is written.
+    const before = await get(others, founder);
+    await expectAppError(update(others, { title: "Renamed" }, dispatcher), 403, "FORBIDDEN");
+    await expectAppError(update(others, { title: "Renamed", ownerId: dispatcher.id }, dispatcher), 403, "FORBIDDEN");
+    await expectAppError(setStatus(others, { status: "done" }, dispatcher), 403, "FORBIDDEN");
+    await expectAppError(note(others, "Hello", dispatcher), 403, "FORBIDDEN");
+    expect(await get(others, founder)).toEqual(before);
+  });
+
+  it("answers 404 to a user with only tasks.assign for an unassigned task they did not create", async () => {
+    const assigner = await actor("Assign Only", ["tasks.assign"]);
+    const loose = await create({ title: "Out of sight", ownerId: null }, founder);
+    await expectAppError(update(loose, { ownerId: assigner.id }, assigner), 404, "NOT_FOUND");
+    expect((await get(loose, founder)).owner_id).toBeNull();
+    expect(await history(loose)).toHaveLength(1);
+  });
+
   it("treats a deactivated owner as Unassigned: owner_id null, still seen by a tasks.view_all user, listed as unassigned", async () => {
     const leaver = await actor("Leaver", []);
     const title = uniq("Leaver task");
@@ -297,6 +335,12 @@ describe("who may see and change a task", () => {
     expect(await get(id, viewer)).toMatchObject({ owner_id: null, owner_name: null, created_by: founder.id });
     expect(await ids({ scope: "all", ownerId: "unassigned", search: title }, viewer)).toEqual([id]);
     expect(await ids({ scope: "all", ownerId: leaver.id }, viewer)).toEqual([]);
+
+    // A form saved unchanged sends the owner it was shown (none): that is not a reassignment, so nothing is written.
+    const before = await get(id, founder);
+    await update(id, { title, ownerId: null }, founder);
+    expect(await get(id, founder)).toEqual(before);
+    expect(await history(id)).toHaveLength(1);
   });
 });
 
@@ -419,7 +463,7 @@ describe("changing the status", () => {
     expect((await history(id)).filter((h) => h.action === "status_changed")).toHaveLength(1);
   });
 
-  it("puts a task in waiting only with a future follow-up time, given or already set (422 otherwise)", async () => {
+  it("puts a task in waiting only with a future follow-up time, given or already set (422 otherwise), and clears it when work resumes", async () => {
     const id = await create({ title: "Wait for CA" }, nobody, NOW);
     await expectAppError(setStatusRaw(id, { status: "waiting" }, nobody, NOW), 422, "VALIDATION_ERROR", /look at it again/);
     await expectAppError(setStatus(id, { status: "waiting", followUpAt: "2026-11-19T05:00:00Z" }, nobody, NOW), 422, "VALIDATION_ERROR", /future/);
@@ -433,18 +477,27 @@ describe("changing the status", () => {
       action: "status_changed", summary: 'Moved "Wait for CA" from Open to Waiting (waiting on the client\'s CA)', metadata: { from: "open", to: "waiting" },
     });
 
-    // A waiting task cannot lose its time; leaving waiting forgets who it was waiting on and keeps the time.
+    // A waiting task cannot lose its time. When work resumes (the reply came), the task forgets who it was waiting on and
+    // its return time, so it is back on the list at once.
     await expectAppError(update(id, { followUpAt: null }, nobody, NOW), 422, "VALIDATION_ERROR", /waiting/i);
     await setStatus(id, { status: "in_progress" }, nobody, NOW);
-    expect(await get(id, nobody)).toMatchObject({ status: "in_progress", waiting_on: null, follow_up_at: "2026-11-25T04:30:00.000Z" });
+    expect(await get(id, nobody)).toMatchObject({ status: "in_progress", waiting_on: null, follow_up_at: null });
 
-    // The time already set is enough while it is still ahead...
+    // A time set on a task that is not waiting is left alone when its status moves.
+    await setStatus(id, { status: "open" }, nobody, NOW);
+    await update(id, { followUpAt: "2026-11-25T10:00:00+05:30" }, nobody, NOW);
+    await setStatus(id, { status: "in_progress" }, nobody, NOW);
+    expect(await get(id, nobody)).toMatchObject({ status: "in_progress", follow_up_at: "2026-11-25T04:30:00.000Z" });
+
+    // That time is enough to wait on while it is still ahead, but not once it has passed.
+    await expectAppError(setStatusRaw(id, { status: "waiting" }, nobody, new Date("2026-11-26T00:00:00Z")), 422, "VALIDATION_ERROR", /has passed/);
+    expect((await get(id, nobody)).status).toBe("in_progress");
     await setStatusRaw(id, { status: "waiting" }, nobody, NOW);
     expect(await get(id, nobody)).toMatchObject({ status: "waiting", follow_up_at: "2026-11-25T04:30:00.000Z" });
-    // ...but not once it has passed.
-    await setStatus(id, { status: "open" }, nobody, NOW);
-    await expectAppError(setStatusRaw(id, { status: "waiting" }, nobody, new Date("2026-11-26T00:00:00Z")), 422, "VALIDATION_ERROR", /look at it again/);
-    expect((await get(id, nobody)).status).toBe("open");
+
+    // Closing a waiting task leaves its time as it was.
+    await setStatus(id, { status: "done" }, nobody, NOW);
+    expect(await get(id, nobody)).toMatchObject({ status: "done", follow_up_at: "2026-11-25T04:30:00.000Z" });
   });
 });
 
