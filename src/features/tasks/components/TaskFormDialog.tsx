@@ -14,8 +14,9 @@ import { useCurrentUser } from "@/components/layout/CurrentUserContext";
 import { ApiError, api } from "@/lib/api-client";
 import { plainText } from "@/lib/validation";
 import type { CategoryRow, PriorityRow } from "../config-service";
-import { canAssign } from "../policy";
+import { canAssign, canManageTaskSettings } from "../policy";
 import type { TaskRow } from "../queries";
+import { QuickAddConfigDialog, type QuickKind } from "./QuickAddConfigDialog";
 
 // Limits as in src/features/tasks/schema.ts: the server checks them again, this only saves a round trip. The title goes
 // through the same plainText rule as the server's.
@@ -59,7 +60,13 @@ interface FormProps extends Props {
   /** Active staff, for the owner picker; null when the user may not give tasks to anyone. */
   staff: Option[] | null;
   userId: string;
+  /** Whether the user may add categories and priorities (tasks.manage_settings): then each picker ends with an Add option. */
+  canAddConfig: boolean;
+  nextRank: number;
 }
+
+/** The picker value that means "add a new one": it is never sent, the add dialog opens instead. */
+const ADD_NEW = "__add_new__";
 
 /** New task, or edit one. The pickers load first, so the form opens with its defaults in place. */
 export function TaskFormDialog({ task, initial, onClose, onSaved }: Props) {
@@ -73,13 +80,19 @@ export function TaskFormDialog({ task, initial, onClose, onSaved }: Props) {
   if (!categories.data || !priorities.data || (assign && !staff.data) || error) {
     return <LoadingDialog error={error} onRetry={() => { categories.reload(); priorities.reload(); staff.reload(); }} onClose={onClose} />;
   }
-  return <TaskForm task={task} initial={initial} onClose={onClose} onSaved={onSaved} categories={categories.data.items} priorities={priorities.data.items} staff={assign ? staff.data!.items : null} userId={user.id} />;
+  return <TaskForm task={task} initial={initial} onClose={onClose} onSaved={onSaved} categories={categories.data.items} priorities={priorities.data.items} staff={assign ? staff.data!.items : null} userId={user.id} canAddConfig={canManageTaskSettings(user)} nextRank={Math.min(99, Math.max(0, ...priorities.data.items.map((p) => p.rank)) + 1)} />;
 }
 
-function TaskForm({ task, initial, onClose, onSaved, categories, priorities, staff, userId }: FormProps) {
+function TaskForm({ task, initial, onClose, onSaved, categories: loadedCategories, priorities: loadedPriorities, staff, userId, canAddConfig, nextRank }: FormProps) {
   const [formError, setFormError] = useState<string | null>(null);
+  // Ones added from this form are kept here, so they show in the picker without loading the lists again.
+  const [addedCategories, setAddedCategories] = useState<Option[]>([]);
+  const [addedPriorities, setAddedPriorities] = useState<(Option & { key: string })[]>([]);
+  const [adding, setAdding] = useState<QuickKind | null>(null);
+  const categories = [...loadedCategories, ...addedCategories];
+  const priorities = [...loadedPriorities, ...addedPriorities];
   const defaultPriority = priorities.find((p) => p.key === "normal") ?? priorities[Math.floor(priorities.length / 2)];
-  const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = useForm<FormInput, unknown, FormOutput>({
+  const { register, handleSubmit, control, setError, setValue, formState: { errors, isSubmitting } } = useForm<FormInput, unknown, FormOutput>({
     resolver: zodResolver(formSchema),
     defaultValues: task
       ? {
@@ -137,15 +150,17 @@ function TaskForm({ task, initial, onClose, onSaved, categories, priorities, sta
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
           <Controller name="categoryId" control={control} render={({ field }) => (
-            <TextField select label="Category" required fullWidth {...field} {...f("categoryId")}>
+            <TextField select label="Category" required fullWidth {...field} onChange={(e) => (e.target.value === ADD_NEW ? setAdding("category") : field.onChange(e))} {...f("categoryId")}>
               {categoryOptions.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+              {canAddConfig && <MenuItem value={ADD_NEW} sx={{ fontWeight: 600, color: "primary.main" }}>+ Add new category…</MenuItem>}
             </TextField>
           )} />
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
           <Controller name="priorityId" control={control} render={({ field }) => (
-            <TextField select label="Priority" required fullWidth {...field} {...f("priorityId")}>
+            <TextField select label="Priority" required fullWidth {...field} onChange={(e) => (e.target.value === ADD_NEW ? setAdding("priority") : field.onChange(e))} {...f("priorityId")}>
               {priorityOptions.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+              {canAddConfig && <MenuItem value={ADD_NEW} sx={{ fontWeight: 600, color: "primary.main" }}>+ Add new priority…</MenuItem>}
             </TextField>
           )} />
         </Grid>
@@ -168,6 +183,21 @@ function TaskForm({ task, initial, onClose, onSaved, categories, priorities, sta
           )} />
         </Grid>
       </Grid>
+      {adding && (
+        <QuickAddConfigDialog
+          kind={adding} nextRank={nextRank} onClose={() => setAdding(null)}
+          onCreated={(created) => {
+            if (adding === "category") {
+              setAddedCategories((list) => [...list, created]);
+              setValue("categoryId", created.id, { shouldValidate: true });
+            } else {
+              setAddedPriorities((list) => [...list, { ...created, key: "" }]);
+              setValue("priorityId", created.id, { shouldValidate: true });
+            }
+            setAdding(null);
+          }}
+        />
+      )}
     </FormShell>
   );
 }
