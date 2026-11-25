@@ -18,6 +18,7 @@ import { canAssign, canEditRow } from "../policy";
 import type { TaskRow as TaskData } from "../queries";
 import { isFollowUpDue, isStuck, type Section } from "../sections";
 import { CategoryChip, PriorityChip, STATUS_LABEL } from "./common";
+import type { TimeMode } from "./TaskTimeDialog";
 
 export type RowStatusChange = "in_progress" | "cancelled";
 
@@ -38,10 +39,11 @@ interface Props {
   onTake: (task: TaskData) => void;
   onEdit: (task: TaskData) => void;
   onStatus: (task: TaskData, status: RowStatusChange) => void;
+  onTime: (task: TaskData, mode: TimeMode) => void;
 }
 
 /** One task on the Desk: what it is, when it is due, who has it, and the few things done to it from the list. */
-export function TaskRow({ task: t, section, today, now, user, showCategory, busy, onOpen, onDone, onTake, onEdit, onStatus }: Props) {
+export function TaskRow({ task: t, section, today, now, user, showCategory, busy, onOpen, onDone, onTake, onEdit, onStatus, onTime }: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const closeMenu = () => setAnchor(null);
 
@@ -91,6 +93,9 @@ export function TaskRow({ task: t, section, today, now, user, showCategory, busy
         {canEdit && (
           <Button size="small" variant="outlined" startIcon={<CheckIcon />} disabled={busy} onClick={() => onDone(t)} aria-label={`Done: ${t.title}`}>Done</Button>
         )}
+        {canEdit && (
+          <Button size="small" variant="outlined" disabled={busy} onClick={() => onTime(t, "followup")} aria-label={`Follow up: ${t.title}`}>Follow up</Button>
+        )}
         {canTake && (
           <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} disabled={busy} onClick={() => onTake(t)} aria-label={`Take it: ${t.title}`}>Take it</Button>
         )}
@@ -101,6 +106,8 @@ export function TaskRow({ task: t, section, today, now, user, showCategory, busy
             </IconButton>
             <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={closeMenu}>
               <MenuItem onClick={() => { closeMenu(); onEdit(t); }}>Edit</MenuItem>
+              <MenuItem onClick={() => { closeMenu(); onTime(t, "snooze"); }}>Snooze</MenuItem>
+              {t.status !== "waiting" && <MenuItem onClick={() => { closeMenu(); onTime(t, "waiting"); }}>Mark waiting</MenuItem>}
               {t.status !== "in_progress" && <MenuItem onClick={() => { closeMenu(); onStatus(t, "in_progress"); }}>Mark in progress</MenuItem>}
               <MenuItem onClick={() => { closeMenu(); onStatus(t, "cancelled"); }}>Cancel task</MenuItem>
             </Menu>

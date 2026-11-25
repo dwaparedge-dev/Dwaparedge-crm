@@ -58,3 +58,7 @@ The brief listed Lead, FollowUp, Quotation, CreditNote, Deal and similar tables.
 | Invoice | `INV-1026-AA01-01` (INV-MMYY-client-nth) | Per client per month of the issue date; allocated at issue |
 
 Invoice numbers must stay within GST's 16 characters (CGST Rule 46), so the prefix is fixed (`INV`) and a client can have at most 99 invoices a month; issuing the 100th is refused with a clear message. Sales, quotations and invoices created before codes existed keep their old numbers (`SL-0007`, `DE/2026-27/0001`); only new documents use the new format.
+
+## Follow-up rules (tasks)
+
+A follow-up time is never set when a task is created (only a cadence is copied from the category). A task with a follow-up time still ahead is **parked** and leaves the Desk, even when overdue, until the time comes; the Parked count shows how many are already late. When the time returns, the task shows under Follow-ups due, or stays in Overdue with a follow-up-due tag when its deadline has also passed. `follow_up_count` is a lifetime count of recorded follow-ups (snoozes are not counted); three or more reads **Stuck**. Leaving `waiting` for open or in progress, and reopening a done or cancelled task, clears the return time.

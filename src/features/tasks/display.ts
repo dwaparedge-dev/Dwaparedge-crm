@@ -86,13 +86,18 @@ export interface DeskFilter {
   categoryId?: string | null;
   /** Show only this section's tasks. */
   section?: Section | null;
+  /** Show only tasks of this priority. */
+  priorityId?: string | null;
 }
 
 /** The Desk's sections narrowed to the filter. Every section is still present; the order inside each is the server's. */
 export function filterSections(sections: Record<Section, TaskRow[]>, filter: DeskFilter = {}): Record<Section, TaskRow[]> {
   const out = {} as Record<Section, TaskRow[]>;
   for (const s of SECTION_ORDER) {
-    out[s] = filter.section && filter.section !== s ? [] : filter.categoryId ? sections[s].filter((t) => t.category_id === filter.categoryId) : sections[s];
+    out[s] =
+      filter.section && filter.section !== s
+        ? []
+        : sections[s].filter((t) => (!filter.categoryId || t.category_id === filter.categoryId) && (!filter.priorityId || t.priority_id === filter.priorityId));
   }
   return out;
 }
@@ -101,18 +106,25 @@ export interface CategoryBlock {
   id: string;
   name: string;
   colour: string;
-  /** In section order (overdue first, parked last); inside a section, in the order the server sent them. */
+  /** In section order (overdue first); inside a section, in the order the server sent them. */
   tasks: { task: TaskRow; section: Section }[];
+  /** The one block of parked tasks, which comes last and starts collapsed. */
+  parked?: boolean;
 }
+
+/** The id of the Parked block, which no category id can be. */
+export const PARKED_BLOCK_ID = "parked";
 
 /**
  * One block per category, in the order of `categories` (most tasks first), each block's tasks ordered by urgency.
  * A category with no tasks left after filtering has no block. A task whose category is not in `categories` still
- * gets one, so a task can never drop off the screen.
+ * gets one, so a task can never drop off the screen. Parked tasks are not among the active ones: they all go into one
+ * Parked block at the end, whatever their category.
  */
 export function groupByCategory(sections: Record<Section, TaskRow[]>, categories: { id: string; name: string; colour: string }[]): CategoryBlock[] {
   const blocks = new Map<string, CategoryBlock>(categories.map((c) => [c.id, { id: c.id, name: c.name, colour: c.colour, tasks: [] }]));
   for (const section of SECTION_ORDER) {
+    if (section === "parked") continue;
     for (const task of sections[section]) {
       let block = blocks.get(task.category_id);
       if (!block) {
@@ -122,5 +134,9 @@ export function groupByCategory(sections: Record<Section, TaskRow[]>, categories
       block.tasks.push({ task, section });
     }
   }
-  return [...blocks.values()].filter((b) => b.tasks.length > 0);
+  const out = [...blocks.values()].filter((b) => b.tasks.length > 0);
+  if (sections.parked.length > 0) {
+    out.push({ id: PARKED_BLOCK_ID, name: "Parked", colour: "#9e9e9e", tasks: sections.parked.map((task) => ({ task, section: "parked" as const })), parked: true });
+  }
+  return out;
 }

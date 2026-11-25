@@ -119,14 +119,33 @@ describe("groupByCategory", () => {
   it("makes one block per category in the given order, each ordered by urgency", () => {
     const blocks = groupByCategory(sampleSections(), CATEGORIES);
     expect(blocks.map((b) => [b.id, b.tasks.map((t) => t.task.id)])).toEqual([
-      ["c1", ["o1", "t1", "n2", "p1"]],
+      ["c1", ["o1", "t1", "n2"]],
       ["c2", ["o2", "n1"]],
+      ["parked", ["p1"]],
     ]);
   });
 
   it("keeps the section each task is in", () => {
     const blocks = groupByCategory(sampleSections(), CATEGORIES);
-    expect(blocks[0]!.tasks.map((t) => t.section)).toEqual(["overdue", "today", "next7", "parked"]);
+    expect(blocks[0]!.tasks.map((t) => t.section)).toEqual(["overdue", "today", "next7"]);
+    expect(blocks[2]!.tasks.map((t) => t.section)).toEqual(["parked"]);
+  });
+
+  it("puts every parked task, whatever its category, in one Parked block at the end", () => {
+    const s = sampleSections();
+    s.parked = [task("p1", "c1"), task("p2", "c2"), task("p3", "c9")];
+    const blocks = groupByCategory(s, CATEGORIES);
+    expect(blocks.map((b) => b.id)).toEqual(["c1", "c2", "parked"]);
+    expect(blocks[2]).toMatchObject({ name: "Parked", parked: true });
+    expect(blocks[2]!.tasks.map((t) => t.task.id)).toEqual(["p1", "p2", "p3"]);
+    expect(blocks.filter((b) => b.parked)).toHaveLength(1);
+  });
+
+  it("has no Parked block when nothing is parked, and a category with only parked tasks has no block of its own", () => {
+    const s = emptySections();
+    s.parked = [task("p1", "c3")];
+    expect(groupByCategory(s, CATEGORIES).map((b) => b.id)).toEqual(["parked"]);
+    expect(groupByCategory(emptySections(), CATEGORIES)).toEqual([]);
   });
 
   it("leaves out a category with no tasks", () => {
@@ -169,6 +188,24 @@ describe("filterSections", () => {
     expect(ids(filterSections(sampleSections(), { categoryId: "c1", section: "next7" }))).toEqual({
       overdue: [], followups_due: [], today: [], next7: ["n2"], later: [], parked: [],
     });
+  });
+
+  it("keeps one priority's tasks", () => {
+    const s = sampleSections();
+    s.overdue[0] = task("o1", "c1", { priority_id: "high" });
+    s.next7[1] = task("n2", "c1", { priority_id: "high" });
+    s.parked[0] = task("p1", "c1", { priority_id: "low" });
+    expect(ids(filterSections(s, { priorityId: "high" }))).toEqual({
+      overdue: ["o1"], followups_due: [], today: [], next7: ["n2"], later: [], parked: [],
+    });
+    expect(ids(filterSections(s, { priorityId: null }))).toEqual(ids(s));
+  });
+
+  it("combines a priority with a category", () => {
+    const s = sampleSections();
+    s.overdue[0] = task("o1", "c1", { priority_id: "high" });
+    s.overdue[1] = task("o2", "c2", { priority_id: "high" });
+    expect(ids(filterSections(s, { priorityId: "high", categoryId: "c2" })).overdue).toEqual(["o2"]);
   });
 
   it("does not change what it was given", () => {

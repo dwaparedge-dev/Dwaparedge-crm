@@ -39,6 +39,7 @@ import { announceTasksChanged } from "../useDeskCounts";
 import { SECTION_LABEL } from "./common";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import { TaskFormDialog } from "./TaskFormDialog";
+import { TaskTimeDialog, type TimeMode } from "./TaskTimeDialog";
 import { TaskRow, type RowStatusChange } from "./TaskRow";
 
 type View = "urgency" | "category";
@@ -113,6 +114,7 @@ export function DeskPage() {
   const [expanded, setExpanded] = useState<Partial<Record<Section, boolean>>>({});
   const [form, setForm] = useState<{ task?: TaskData } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [timing, setTiming] = useState<{ task: TaskData; mode: TimeMode } | null>(null);
   const [cancelling, setCancelling] = useState<TaskData | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
@@ -174,6 +176,7 @@ export function DeskPage() {
     onDone: (t: TaskData) => void setStatus(t, "done"),
     onTake: (t: TaskData) => void take(t),
     onEdit: (t: TaskData) => setForm({ task: t }),
+    onTime: (t: TaskData, mode: TimeMode) => setTiming({ task: t, mode }),
     onStatus: (t: TaskData, status: RowStatusChange) => (status === "cancelled" ? setCancelling(t) : void setStatus(t, status)),
   });
 
@@ -270,6 +273,12 @@ export function DeskPage() {
         <TaskFormDialog
           task={form.task} onClose={() => setForm(null)}
           onSaved={() => { notify.success(form.task ? "Task updated" : "Task created"); setForm(null); reload(); announceTasksChanged(); }}
+        />
+      )}
+      {timing && (
+        <TaskTimeDialog
+          task={timing.task} mode={timing.mode} onClose={() => setTiming(null)}
+          onDone={(message) => { notify.success(message); setTiming(null); reload(); announceTasksChanged(); }}
         />
       )}
       {openId && desk && <TaskDetailPanel key={openId} taskId={openId} today={desk.today} onClose={() => setOpenId(null)} />}
