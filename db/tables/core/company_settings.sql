@@ -28,5 +28,6 @@ CREATE TABLE IF NOT EXISTS company_settings (
   round_off_total      BOOLEAN      NOT NULL DEFAULT true,  -- round grand total to the nearest rupee
   invoice_tagline      TEXT,        -- small line under the company name on the invoice header
   invoice_declaration  TEXT,        -- optional declaration printed above the signatory; NULL = none
+  task_defaults_seeded BOOLEAN      NOT NULL DEFAULT false,  -- the starter task categories and priorities are added once; a deleted one stays deleted
   updated_at           TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

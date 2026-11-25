@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS task_priorities (
   rank       INTEGER     NOT NULL CHECK (rank >= 1),  -- 1 = most urgent
   sort_order INTEGER     NOT NULL DEFAULT 0,
   is_active  BOOLEAN     NOT NULL DEFAULT true,   -- hidden from the pickers when false
-  is_system  BOOLEAN     NOT NULL DEFAULT false,  -- seeded rows the code relies on: can be renamed or hidden, never deleted
+  is_system  BOOLEAN     NOT NULL DEFAULT false,  -- starter row (added once at first setup); after that it is an ordinary row
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT task_priorities_key_key UNIQUE (key)

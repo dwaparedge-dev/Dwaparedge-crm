@@ -202,19 +202,19 @@ describe.each(["categories", "priorities"] as const)("task %s", (kind) => {
     expect(await db.queryOne(`SELECT updated_at FROM ${KINDS[kind].table} WHERE id = $1`, [id])).toEqual(stamp);
   });
 
-  it("lets a starter row be renamed, recoloured and hidden, but never deleted, so the seeds cannot bring one back", async () => {
+  it("lets a starter row be renamed, recoloured, hidden and (when no task uses it) deleted like any other", async () => {
     const starter = (await all(kind)).find((r) => r.key === seeded[1])!;
     await update(kind, starter.id, { name: "Renamed Starter", colour: "#000000", isActive: false });
     expect(await find(kind, starter.id)).toMatchObject({ key: seeded[1], name: "Renamed Starter", colour: "#000000", is_active: false, is_system: true });
     expect((await visible(kind)).map((r) => r.id)).not.toContain(starter.id);
     await update(kind, starter.id, { name: starter.name, colour: starter.colour, isActive: true });
 
-    // Every starter row is protected, including the ones the auto-tasks do not use.
-    for (const key of [seeded[1], seeded.at(-1)!]) {
-      const id = (await all(kind)).find((r) => r.key === key)!.id;
-      await expectAppError(remove(kind, id), 409, "PROTECTED", /hidden but not deleted/);
-    }
-    expect((await all(kind)).map((r) => r.key)).toEqual(expect.arrayContaining(seeded));
+    // Deleting is allowed (tasks.manage_settings): the last starter row goes, the rest stay. The seeds do not bring it back
+    // (tests/integration/tasks-no-defaults.int.test.ts).
+    const last = (await all(kind)).find((r) => r.key === seeded.at(-1)!)!;
+    await remove(kind, last.id);
+    expect((await all(kind)).map((r) => r.key)).not.toContain(seeded.at(-1)!);
+    expect((await all(kind)).map((r) => r.key)).toEqual(expect.arrayContaining(seeded.slice(0, -1)));
   });
 
   it("refuses to delete a row a task uses, but still lets it be hidden", async () => {
@@ -404,10 +404,6 @@ describe("the routes", () => {
       const dup = await POST(req(r.path, "POST", r.body(`${name.toUpperCase()} V2`)));
       expect(dup.status).toBe(409);
       expect((await dup.json()).error.code).toBe("DUPLICATE");
-      const starter = (await all(kind)).find((x) => x.is_system)!;
-      const protectedRow = await DELETE(req(`${r.path}/${starter.id}`, "DELETE"), params(starter.id));
-      expect(protectedRow.status).toBe(409);
-      expect((await protectedRow.json()).error.code).toBe("PROTECTED");
       const busy = await create(kind, { name: uniq("Busy") });
       await useInATask(kind, busy);
       const inUse = await DELETE(req(`${r.path}/${busy}`, "DELETE"), params(busy));

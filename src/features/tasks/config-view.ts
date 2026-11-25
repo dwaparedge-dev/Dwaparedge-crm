@@ -36,9 +36,7 @@ export function moveRow(rows: readonly Orderable[], index: number, dir: -1 | 1):
 }
 
 /** Why a row cannot be deleted, in words for a tooltip; null when it can be. A row that is not deletable can still be hidden. */
-export function deleteBlockedReason(row: { is_system: boolean; in_use: boolean }, noun: "category" | "priority"): string | null {
-  const plural = noun === "category" ? "categories" : "priorities";
-  if (row.is_system) return `Starter ${plural} can be hidden, not deleted`;
+export function deleteBlockedReason(row: { in_use: boolean }, noun: "category" | "priority"): string | null {
   if (row.in_use) return `Tasks use this ${noun}. Hide it instead.`;
   return null;
 }

@@ -55,18 +55,13 @@ describe("moveRow", () => {
 });
 
 describe("deleteBlockedReason", () => {
-  it("can be deleted when it is neither a starter row nor in use", () => {
-    expect(deleteBlockedReason({ is_system: false, in_use: false }, "category")).toBeNull();
-    expect(deleteBlockedReason({ is_system: false, in_use: false }, "priority")).toBeNull();
-  });
-
-  it("says starter rows can be hidden, not deleted", () => {
-    expect(deleteBlockedReason({ is_system: true, in_use: false }, "category")).toBe("Starter categories can be hidden, not deleted");
-    expect(deleteBlockedReason({ is_system: true, in_use: true }, "priority")).toBe("Starter priorities can be hidden, not deleted");
+  it("can be deleted when no task uses it (starter rows too)", () => {
+    expect(deleteBlockedReason({ in_use: false }, "category")).toBeNull();
+    expect(deleteBlockedReason({ in_use: false }, "priority")).toBeNull();
   });
 
   it("says a row that tasks use is hidden instead", () => {
-    expect(deleteBlockedReason({ is_system: false, in_use: true }, "category")).toBe("Tasks use this category. Hide it instead.");
-    expect(deleteBlockedReason({ is_system: false, in_use: true }, "priority")).toBe("Tasks use this priority. Hide it instead.");
+    expect(deleteBlockedReason({ in_use: true }, "category")).toBe("Tasks use this category. Hide it instead.");
+    expect(deleteBlockedReason({ in_use: true }, "priority")).toBe("Tasks use this priority. Hide it instead.");
   });
 });

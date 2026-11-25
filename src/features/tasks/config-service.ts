@@ -194,17 +194,16 @@ export async function updateConfig<K extends ConfigKind>(kind: K, id: string, in
   });
 }
 
-/** Starter rows and rows that tasks use cannot be deleted, only hidden. */
+/** A row that tasks use cannot be deleted, only hidden. Starter rows are ordinary rows once added: they can be deleted too. */
 export async function deleteConfig(kind: ConfigKind, id: string, actor: CurrentUser): Promise<void> {
   requireSettingsAccess(actor);
-  const { table, taskColumn, entityType, noun, plural } = KINDS[kind];
+  const { table, taskColumn, entityType, noun } = KINDS[kind];
 
   await db.transaction(async (tx) => {
     // The row lock also makes a task being created for this row wait, so the in-use check below cannot go stale.
-    const found = await tx.query<{ key: string; name: string; is_system: boolean }>(`SELECT key, name, is_system FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
+    const found = await tx.query<{ key: string; name: string }>(`SELECT key, name FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
     const cur = found.rows[0];
     if (!cur) throw new AppError(`Task ${noun} not found`, 404, "NOT_FOUND");
-    if (cur.is_system) throw new AppError(`Starter ${plural} can be hidden but not deleted`, 409, "PROTECTED");
     const used = await tx.query(`SELECT 1 FROM tasks WHERE ${taskColumn} = $1 LIMIT 1`, [id]);
     if (used.rowCount) throw new AppError(`Tasks use this ${noun}. Hide it instead of deleting it.`, 409, "IN_USE");
 

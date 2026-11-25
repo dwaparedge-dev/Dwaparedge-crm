@@ -21,8 +21,13 @@ export async function raiseCandidates(candidates: SignalCandidate[], tx: PoolCli
   let created = 0;
   for (const c of candidates) {
     const { rows } = await tx.query<{ id: string }>(
+      // The category and priority the rule names (by key) when they still exist; the first visible one otherwise, because starter
+      // rows can be renamed or deleted. With none at all there is nothing to put the task under: it waits (the next run raises it).
       `INSERT INTO tasks (title, category_id, priority_id, status, owner_id, client_id, origin, source_type, source_id, dedupe_key, due_date)
-       SELECT $1, (SELECT id FROM task_categories WHERE key = $2), (SELECT id FROM task_priorities WHERE key = $3), 'open', $4, $5, 'auto', $6, $7, $8, $9::date
+       SELECT $1, c.id, p.id, 'open', $4, $5, 'auto', $6, $7, $8, $9::date
+       FROM (SELECT COALESCE((SELECT id FROM task_categories WHERE key = $2), (SELECT id FROM task_categories WHERE is_active ORDER BY sort_order, id LIMIT 1)) AS id) c,
+            (SELECT COALESCE((SELECT id FROM task_priorities WHERE key = $3), (SELECT id FROM task_priorities WHERE is_active ORDER BY rank, id LIMIT 1)) AS id) p
+       WHERE c.id IS NOT NULL AND p.id IS NOT NULL
        ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING RETURNING id`,
       [c.title, c.categoryKey, c.priorityKey, c.ownerId, c.clientId, c.sourceType, c.sourceId, c.dedupeKey, c.dueDate],
     );
