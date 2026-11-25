@@ -55,8 +55,10 @@ export async function getDashboard(q: z.infer<typeof dashboardQuerySchema>) {
        FROM licenses l JOIN clients c ON c.id = l.client_id JOIN products pr ON pr.id = l.product_id
        WHERE l.status = 'active' AND l.expiry_date <= ${TODAY} + 30 ORDER BY l.expiry_date LIMIT 8`,
     ),
+    // Every signed-in user sees this feed, so account changes stay out of it: a permission grant names an email address.
     db.query(
-      `SELECT a.id, a.summary, a.entity_type, u.name AS actor_name, a.created_at FROM activity_log a LEFT JOIN users u ON u.id = a.actor_id ORDER BY a.created_at DESC, a.id DESC LIMIT 10`,
+      `SELECT a.id, a.summary, a.entity_type, u.name AS actor_name, a.created_at FROM activity_log a LEFT JOIN users u ON u.id = a.actor_id
+       WHERE a.entity_type <> 'user' ORDER BY a.created_at DESC, a.id DESC LIMIT 10`,
     ),
     // Six months ending with the month of the period's end date: invoiced (issued invoices) vs collected (payments received).
     db.query<{ month: string; invoiced: string; collected: string }>(

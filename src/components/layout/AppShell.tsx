@@ -24,6 +24,7 @@ import MenuIcon from "@mui/icons-material/Menu";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DashboardIcon from "@mui/icons-material/SpaceDashboardOutlined";
+import TasksIcon from "@mui/icons-material/TaskAltOutlined";
 import DemoRequestsIcon from "@mui/icons-material/ContactPhoneOutlined";
 import ClientsIcon from "@mui/icons-material/BusinessOutlined";
 import ProductsIcon from "@mui/icons-material/Inventory2Outlined";
@@ -36,17 +37,20 @@ import NotificationsIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import { IdleSignOut } from "./IdleSignOut";
 import LockIcon from "@mui/icons-material/LockOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { NAV_GROUPS, type NavItem } from "./nav";
+import { NAV_GROUPS, NAV_ITEMS, type NavItem } from "./nav";
 import { useNotify } from "@/components/common/Notify";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PageSearch } from "./PageSearch";
 import { useNewDemoRequestCount } from "@/features/demo-requests/useNewDemoRequestCount";
+import { useDeskCounts } from "@/features/tasks/useDeskCounts";
+import { CurrentUserProvider, type CurrentUserValue } from "./CurrentUserContext";
 
 const FULL = 230;
 const MINI = 71;
 
 const ICONS: Record<NavItem["icon"], React.ReactNode> = {
   dashboard: <DashboardIcon />,
+  tasks: <TasksIcon />,
   demoRequests: <DemoRequestsIcon />,
   clients: <ClientsIcon />,
   products: <ProductsIcon />,
@@ -57,7 +61,7 @@ const ICONS: Record<NavItem["icon"], React.ReactNode> = {
   settings: <SettingsIcon />,
 };
 
-export function AppShell({ user, children }: { user: { name: string; email: string }; children: React.ReactNode }) {
+export function AppShell({ user, children }: { user: CurrentUserValue; children: React.ReactNode }) {
   const theme = useTheme();
   const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
   const [collapsed, setCollapsed] = useState(false);
@@ -69,9 +73,23 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
   const router = useRouter();
   const notify = useNotify();
   const newDemoRequests = useNewDemoRequestCount();
+  const deskCounts = useDeskCounts();
+
+  // What the bell and the sidebar badges count. "Is anything waiting" is decided here, once.
+  const bellTotal = newDemoRequests + deskCounts.badge;
+  const anythingWaiting = bellTotal > 0;
+  const navBadges: Record<string, { count: number; label: string } | undefined> = {
+    "/demo-requests": { count: newDemoRequests, label: `${newDemoRequests} new` },
+    "/tasks": { count: deskCounts.badge, label: `${deskCounts.badge} overdue or due for a follow-up` },
+  };
 
   const mini = isDesktop && collapsed;
   const width = isDesktop ? (collapsed ? MINI : FULL) : 0;
+
+  // "/tasks" is also the start of "/tasks/all", so the longest matching href is the page we are on.
+  const activeHref = NAV_ITEMS
+    .filter((i) => (i.href === "/" ? pathname === "/" : pathname.startsWith(i.href)))
+    .reduce((best, i) => (i.href.length > best.length ? i.href : best), "");
 
   async function logout() {
     setMenuAnchor(null);
@@ -110,7 +128,8 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
             )}
             <List disablePadding>
               {group.items.map((item) => {
-                const selected = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                const selected = item.href === activeHref;
+                const badge = navBadges[item.href];
                 const button = (
                   <ListItemButton
                     key={item.href}
@@ -122,7 +141,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
                     sx={{ borderRadius: 2, mb: 0.5, py: 1.1, justifyContent: mini ? "center" : "flex-start" }}
                   >
                     <ListItemIcon sx={{ minWidth: mini ? 0 : 40 }}>
-                      {item.icon === "demoRequests" ? <Badge color="error" max={99} badgeContent={newDemoRequests} aria-label={`${newDemoRequests} new`}>{ICONS[item.icon]}</Badge> : ICONS[item.icon]}
+                      {badge ? <Badge color="error" max={99} badgeContent={badge.count} aria-label={badge.label}>{ICONS[item.icon]}</Badge> : ICONS[item.icon]}
                     </ListItemIcon>
                     {!mini && <ListItemText primary={item.label} slotProps={{ primary: { variant: "body1", sx: { fontWeight: 500 } } }} />}
                   </ListItemButton>
@@ -174,8 +193,8 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
           <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, md: 1.5 } }}>
             <Box sx={{ display: { xs: "none", sm: "block" } }}><PageSearch onNavigate={(href) => router.push(href)} /></Box>
             <Tooltip title="Notifications">
-              <IconButton aria-label={newDemoRequests > 0 ? `Notifications, ${newDemoRequests} new` : "Notifications"} onClick={(e) => setBellAnchor(e.currentTarget)}>
-                <Badge color="error" max={99} badgeContent={newDemoRequests}><NotificationsIcon /></Badge>
+              <IconButton aria-label={anythingWaiting ? `Notifications, ${bellTotal} waiting` : "Notifications"} onClick={(e) => setBellAnchor(e.currentTarget)}>
+                <Badge color="error" max={99} badgeContent={bellTotal}><NotificationsIcon /></Badge>
               </IconButton>
             </Tooltip>
             <Tooltip title="Settings">
@@ -193,10 +212,21 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
             slotProps={{ paper: { sx: { mt: 1.5, width: 300, borderRadius: 2, p: 2 } } }}
           >
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Notifications</Typography>
-            {newDemoRequests > 0 ? (
+            {anythingWaiting ? (
               <>
-                <Typography variant="body2" sx={{ mt: 0.5 }}>{newDemoRequests} new demo request{newDemoRequests === 1 ? "" : "s"} waiting for a first call.</Typography>
-                <Button id="bell-open-demo-requests" size="small" variant="contained" sx={{ mt: 1.5 }} onClick={() => { setBellAnchor(null); router.push("/demo-requests?status=new"); }}>Open demo requests</Button>
+                {newDemoRequests > 0 && (
+                  <Box>
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>{newDemoRequests} new demo request{newDemoRequests === 1 ? "" : "s"} waiting for a first call.</Typography>
+                    <Button id="bell-open-demo-requests" size="small" variant="contained" sx={{ mt: 1.5 }} onClick={() => { setBellAnchor(null); router.push("/demo-requests?status=new"); }}>Open demo requests</Button>
+                  </Box>
+                )}
+                {deskCounts.badge > 0 && (
+                  <Box sx={{ mt: newDemoRequests > 0 ? 2 : 0 }}>
+                    {deskCounts.overdue > 0 && <Typography variant="body2" sx={{ mt: 0.5 }}>{deskCounts.overdue} overdue</Typography>}
+                    {deskCounts.followUpsDue > 0 && <Typography variant="body2" sx={{ mt: 0.5 }}>{deskCounts.followUpsDue} follow-up{deskCounts.followUpsDue === 1 ? "" : "s"} due</Typography>}
+                    <Button id="bell-open-desk" size="small" variant="contained" sx={{ mt: 1.5 }} onClick={() => { setBellAnchor(null); router.push("/tasks"); }}>Open Desk</Button>
+                  </Box>
+                )}
               </>
             ) : (
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>You’re all caught up.</Typography>
@@ -236,7 +266,7 @@ export function AppShell({ user, children }: { user: { name: string; email: stri
             borderTopRightRadius: { xs: 16, md: 0 }, borderBottomRightRadius: { xs: 16, md: 0 },
           }}
         >
-          <Box sx={{ maxWidth: 1440, mx: "auto", width: "100%" }}>{children}</Box>
+          <Box sx={{ maxWidth: 1440, mx: "auto", width: "100%" }}><CurrentUserProvider user={user}>{children}</CurrentUserProvider></Box>
         </Box>
       </Box>
       {changingPassword && <ChangePasswordDialog onClose={() => setChangingPassword(false)} />}

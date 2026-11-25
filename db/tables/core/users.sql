@@ -1,5 +1,6 @@
 -- Table: users
--- Staff login accounts. All authenticated users have full access (no roles in v1).
+-- Staff login accounts. No roles: every signed-in user sees the same pages, and the task desk's extra abilities
+-- are individual permission keys in `permissions` (see src/lib/auth/permissions.ts).
 CREATE TABLE IF NOT EXISTS users (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   name          TEXT        NOT NULL,
@@ -7,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT        NOT NULL,  -- bcrypt hash, never plaintext
   token_version INTEGER     NOT NULL DEFAULT 0,  -- bump to revoke all sessions
   is_active     BOOLEAN     NOT NULL DEFAULT true,
+  permissions   TEXT[]      NOT NULL DEFAULT '{}',  -- permission keys held by this account; none by default
   last_login_at TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()

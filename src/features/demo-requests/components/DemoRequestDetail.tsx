@@ -19,6 +19,7 @@ import EmailIcon from "@mui/icons-material/EmailOutlined";
 import HistoryIcon from "@mui/icons-material/HistoryOutlined";
 import InfoIcon from "@mui/icons-material/InfoOutlined";
 import PhoneIcon from "@mui/icons-material/PhoneOutlined";
+import TaskAltIcon from "@mui/icons-material/TaskAltOutlined";
 import WhatsAppIcon from "@mui/icons-material/WhatsApp";
 import { HeroActions } from "@/components/common/HeroActions";
 import { InfoBox, SectionLabel } from "@/components/common/InfoBox";
@@ -30,6 +31,8 @@ import {
   type MasterStatusType,
 } from "@/components/shared/DetailView";
 import { api } from "@/lib/api-client";
+import { TaskFormDialog } from "@/features/tasks/components/TaskFormDialog";
+import { announceTasksChanged } from "@/features/tasks/useDeskCounts";
 import type { DemoRequestStatus } from "../schema";
 import type { DemoRequestEventRow, DemoRequestRow } from "../service";
 import { announceDemoRequestsChanged } from "../useNewDemoRequestCount";
@@ -85,6 +88,7 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
   const notify = useNotify();
   const [tab, setTab] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
   const spam = r.status === "spam";
   const eventCount = r.events.length;
   const tabs = useMemo(() => [
@@ -132,6 +136,7 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
               <Button id="demo-call" fullWidth variant="contained" startIcon={<PhoneIcon />} href={`tel:+91${r.mobile}`}>Call {formatMobile(r.mobile)}</Button>
               <Button id="demo-whatsapp" fullWidth variant="outlined" startIcon={<WhatsAppIcon />} href={`https://wa.me/91${r.mobile}`} target="_blank" rel="noopener noreferrer">WhatsApp</Button>
               <Button id="demo-email" fullWidth variant="outlined" startIcon={<EmailIcon />} href={`mailto:${r.email}`}>Email</Button>
+              {!spam && <Button id="demo-add-task" fullWidth variant="outlined" startIcon={<TaskAltIcon />} onClick={() => setAddingTask(true)}>Add follow-up task</Button>}
               {spam
                 ? <Button id="demo-not-spam" fullWidth variant="outlined" disabled={busy} onClick={() => setStatus("new")}>Not spam, reopen</Button>
                 : <Button id="demo-mark-spam" fullWidth variant="outlined" color="error" disabled={busy} onClick={() => setStatus("spam")}>Mark as spam</Button>}
@@ -193,6 +198,16 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
           )}
         </DetailTabPanel>
       </DetailViewTabs>
+      {addingTask && (
+        <TaskFormDialog
+          initial={{
+            title: `Follow up: ${r.company} (${r.name})`,
+            description: `Demo request from ${r.name}, ${r.company}. Mobile ${formatMobile(r.mobile)}, email ${r.email}.`,
+          }}
+          onClose={() => setAddingTask(false)}
+          onSaved={() => { setAddingTask(false); notify.success("Task created. It is on your Desk."); announceTasksChanged(); }}
+        />
+      )}
     </DetailViewLayout>
   );
 }

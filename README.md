@@ -24,9 +24,10 @@ Internal web app for Dwapar Edge Private Limited to manage **clients, sales, sof
 - **Invoices** are always raised **against a sale**, in full, as a percentage, as an amount before GST, or as an instalment of the sale's billing plan, so a sale can be billed in parts without ever being over-billed. Professional PDF format: draft → issue → (cancel). CGST+SGST or IGST by state, per-line GST rates, round-off, amount in words, bank details. Issued invoices are immutable.
 - **Payments** ledger with allocation to invoices (partial, multi-invoice, advances), reallocation, void, receipts (PDF). Payments can be recorded **for a sale**: part payments reduce the sale's remaining balance, and money received before an invoice exists is held as that sale's **advance** and applied (by you, with one click) once an invoice is issued.
 - **Demo requests** from the FactoOne website's "Book a demo" form arrive on their own page (see [docs/API.md](docs/API.md#demo-request-intake-server-to-server)): call, WhatsApp and email links, a status (New → Contacted → Scheduled → Done, or Spam), an owner, notes and a history. The number of new requests shows on the sidebar, the bell and the dashboard.
-- **Dashboard** with KPIs, trend and receivables-ageing charts, pipeline, licence health and recent activity.
+- **Task Desk** (sidebar: Desk): one morning screen for what is still pending, by urgency (overdue, due today, next 7 days, no date, plus sections for follow-ups that have come due and for parked tasks) and by category. A task has a title, a category and priority from your own lists, a status (open, in progress, waiting, done, cancelled; tasks are cancelled, never deleted), an owner, an optional client and due date, and a timeline of everything that happened to it. On the Desk you can narrow the list by section, category, priority and (with `tasks.view_all`) owner; in the By category view all parked tasks sit in one collapsed block at the end. A client page and a demo request page each have an **Add follow-up task** button that opens the new-task form with the title (and client) filled in. The sidebar and bell show how many tasks are overdue or due for a follow-up, and the dashboard has a "Needs you today" card. **All tasks** is a filterable table (status, category, priority, owner, client, due dates, source, search; the filters live in the address, so a view can be bookmarked) where a done or cancelled task can be reopened. Categories and priorities are edited under Settings → Task categories and Task priorities. Access is per user: see [Staff accounts](#staff-accounts).
+- **Dashboard** with KPIs, trend and receivables-ageing charts, pipeline, licence health and recent activity, and a "Needs you today" card for overdue tasks and follow-ups.
 
-Not in v1 (by decision): email sending, a full leads pipeline with follow-up reminders (demo requests are only logged and worked by hand), quotations, credit notes, CSV client import, roles/permissions, e-invoicing (IRN). See [Known limitations](#known-limitations).
+Not in v1 (by decision): email sending and email or WhatsApp reminders, a full leads pipeline (demo requests are logged and worked by hand), tasks the CRM raises by itself from invoices, licences or demo requests, the Follow up and Snooze actions on a task (the Desk already has the sections they will fill), quotations, credit notes, CSV client import, a user-management screen and named roles (access is per-user permissions, so far only for tasks), e-invoicing (IRN). See [Known limitations](#known-limitations).
 
 ## How it flows
 
@@ -74,6 +75,7 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `JWT_EXPIRES_IN_DAYS` | no (7) | Session lifetime |
 | `BCRYPT_SALT_ROUNDS` | no (12) | Password hashing cost (10-15) |
 | `RATE_LIMIT_SALT` | no | Salt for hashing emails/IPs in the login rate limiter |
+| `TASKS_AUTO_FROM` | no | Date (`YYYY-MM-DD`). Auto-raised tasks (new demo request, overdue invoice, licence expiring or lapsed, milestone ready to bill) stay **off until this is set**, and then only cover records dated on or after it. Review older ones with `npm run tasks:backfill` |
 | `DEMO_INTAKE_KEY` | no | Shared secret (32+ chars) the FactoOne site sends as `X-Intake-Key` when posting a demo request. Unset = the intake endpoint answers 503 |
 | `SEED_ADMIN_NAME/EMAIL/PASSWORD` | first run | Used only by `db:seed-admin` (password ≥ 12 chars) |
 
@@ -96,18 +98,34 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `npm run db:sync` | Build or update the database from `db/tables`, `db/logic`, `db/seeds` (also `-- --module=billing` / `-- --table=payments`); then locks the Supabase API roles out. Never drops anything. See [Database sync](#database-sync) |
 | `npm run db:migrate` | Apply new numbered `db/migrations/*.sql` (one-off drops, renames, data fixes), each in a transaction |
 | `npm run db:seed-admin` | Create the first user from `SEED_ADMIN_*` (no-op if the email exists) |
-| `npm run users -- <command>` | `list`, `create`, `passwd`, `deactivate`, `activate` (passwords typed at a hidden prompt) |
+| `npm run users -- <command>` | `list`, `create` (optionally `--grant a,b`), `passwd`, `deactivate`, `activate`, `events`, and the task permissions `permissions`, `grant`, `revoke` (passwords typed at a hidden prompt). See [Staff accounts](#staff-accounts) |
+| `npm run tasks:backfill` | Needs `TASKS_AUTO_FROM`. Dry run: lists the auto-tasks that would be raised for records dated before it. Add `-- --apply` to create them, `-- --max-age-days N` to limit how old |
 | `npm run invoices:refresh` | Dry run: lists issued invoices whose line wording no longer matches their sale. Add `-- --apply` to regenerate them (earlier versions are kept) |
 
 ### Staff accounts
 
-There is no user-management screen in v1, and no roles: **every signed-in user can do everything**, so only create accounts for people who should have full access.
+There is no user-management screen in v1, and no named roles. Each account carries its own list of **permission keys**, which today govern only the Task Desk; **every other page (clients, invoices, payments, licences, settings) is open to every signed-in user**. So only create accounts for people who may see client and billing data, until a later release adds permissions to those pages (see [docs/SECURITY.md](docs/SECURITY.md#per-user-permissions)).
 
 ```bash
 npm run users -- create --email asha@example.com --name "Asha"
+npm run users -- create --email asha@example.com --name "Asha" --grant tasks.view_all,tasks.assign   # create and grant in one go
 npm run users -- passwd --email asha@example.com        # reset, signs the user out everywhere
 npm run users -- deactivate --email asha@example.com    # block login, end all sessions
+npm run users -- permissions --email asha@example.com   # list the permissions the account holds
+npm run users -- grant  --email asha@example.com --permission tasks.edit_all
+npm run users -- revoke --email asha@example.com --permission tasks.edit_all
 ```
+
+**A new account holds no permissions.** Someone with none can create tasks for themselves and see and change the tasks they own or created, and nothing more. The four keys:
+
+| Permission | What it allows |
+|---|---|
+| `tasks.view_all` | See everyone's tasks and the unassigned ones; filter the Desk and All tasks by owner |
+| `tasks.edit_all` | Change, complete and add notes to other people's tasks (includes `tasks.view_all`) |
+| `tasks.assign` | Give a task to someone else, or take an unassigned one |
+| `tasks.manage_settings` | Add, rename, recolour, reorder, hide and delete task categories and priorities (the two Settings tabs appear only with this) |
+
+The accounts that existed when permissions arrived, and the admin made by `db:seed-admin`, hold all four. A grant or revoke takes effect on the person's next request and is written to the activity log as a command-line change (the command line has no signed-in person). `create --grant` applies only to an account it creates, never to one that already exists. A mistyped key is refused, and the error lists the valid keys.
 
 Users can change their own password from the account menu (top right).
 
@@ -129,6 +147,7 @@ A sync never drops or rewrites anything, so removing or renaming a column, chang
 1. Push the repo and import it in Vercel (framework: Next.js; Node 20+).
 2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it), and `DEMO_INTAKE_KEY` if the FactoOne site should send demo requests (see [docs/API.md](docs/API.md#demo-request-intake-server-to-server)). Use a **different** `JWT_SECRET` and `DEMO_INTAKE_KEY` from local.
 3. Sync the schema and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:sync && npm run db:seed-admin`) before the first deploy. The build does not migrate automatically, on purpose.
+   **Task Desk release order:** run `db:sync` and then `db:migrate` against production **before** the new code goes live (the new code reads `users.permissions`, and the app fails with "column permissions does not exist" until they have run). `db:migrate` gives every existing login all four task permissions (see [Staff accounts](#staff-accounts)); new accounts start with none. Auto-raised tasks stay off until you set `TASKS_AUTO_FROM`; set it to the go-live date, then run `npm run tasks:backfill` (dry run first) only if you want older records raised too.
 4. Pick the Vercel function region closest to your Supabase region (e.g. Supabase `ap-southeast-2` → Vercel `syd1`) to keep database round trips short.
 5. Each serverless instance keeps a small pool (3 connections on Vercel). If you scale up, watch the Supabase pooler's connection limit.
 
@@ -211,12 +230,12 @@ Route handlers are thin: parse with Zod → `requireUser()` → call a service �
 
 - **Accountant sign-off needed** for: treatment of advance payments (an advance is recorded as a receipt and held against the sale; under GST an *advance receipt voucher* may be required for services, and this app does not generate one), credit-note handling (not built; cancel + re-issue instead), place-of-supply edge cases, round-off policy, and whether your invoice wording meets GST rules. TDS and e-invoicing/IRN are not handled.
 - **"Fixed amount" billing is before GST.** If a client has agreed to pay a round figure including GST, use a percentage or check the invoice preview: the total is shown before you issue.
-- **No roles or permissions**: all users have full access. Add before giving access to anyone who should not see financials.
+- **No roles, and permissions only for tasks**: apart from the four task permissions, all users have full access to everything. Do not create accounts for people who should not see client and billing data until the rest of the CRM has permissions. The dashboard's recent-activity feed and a client's History tab also show task activity (titles and notes) to every signed-in user.
 - **Receipts** use the current company settings (they do not keep a snapshot like invoices do).
 - **An issued invoice never changes.** Its PDF is built from details frozen when it was issued (your company, the client, the project and milestone, the lines and totals), so editing or archiving the client, changing Settings, or editing the sale afterwards cannot alter it. It does not show payments, so recording one does not change it either (payments are tracked on the invoice page). The only thing that can change its look is a cancellation watermark.
 - **Invoices issued before the milestone-format update** have no document snapshot, so their PDF shows the new layout without the project references (issued invoices are immutable and cannot be back-filled).
 - **No email**: PDFs are viewed or downloaded and sent by hand.
-- **No scheduled jobs**: renewal and overdue reminders are dashboard alerts, not notifications.
+- **No scheduled jobs**: renewal and overdue reminders are dashboard alerts, not notifications, and an overdue task shows on the Desk and in the sidebar badge rather than arriving by email or WhatsApp.
 - **Single currency (INR)**, single company.
 - The login lock-out can be abused to lock a known email for 15 minutes; the per-IP limit trusts `x-forwarded-for`, which is reliable on Vercel but spoofable elsewhere.
 - Integration tests are slow over a remote database.

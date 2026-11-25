@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import pg from "pg";
 import { config } from "dotenv";
+import { PERMISSIONS } from "../src/lib/auth/permissions";
 config({ path: ".env.local" });
 config();
 
@@ -19,9 +20,9 @@ async function run() {
   try {
     const hash = await bcrypt.hash(SEED_ADMIN_PASSWORD!, Number(BCRYPT_SALT_ROUNDS) || 12);
     const res = await pool.query(
-      `INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3)
+      `INSERT INTO users (name, email, password_hash, permissions) VALUES ($1, $2, $3, $4)
        ON CONFLICT (lower(email)) DO NOTHING RETURNING id`,
-      [SEED_ADMIN_NAME || "Admin", SEED_ADMIN_EMAIL!.trim(), hash],
+      [SEED_ADMIN_NAME || "Admin", SEED_ADMIN_EMAIL!.trim(), hash, [...PERMISSIONS]],
     );
     console.log(res.rowCount ? "admin user created" : "user already exists; nothing changed");
   } finally {

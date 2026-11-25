@@ -23,3 +23,30 @@ INSERT INTO field_options (table_name, column_name, option_key, option_value, so
   ('client_documents','doc_type','other','Other',50,true)
 ON CONFLICT DO NOTHING;
 INSERT INTO company_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- Starter task categories and priorities (the Task Desk). They are added ONCE, the first time this file runs on a database
+-- (company_settings.task_defaults_seeded marks that it happened). After that they are ordinary rows: renamed, recoloured, hidden
+-- or deleted like any other, and a deleted one is not put back by a later sync.
+INSERT INTO task_categories (key, name, colour, default_follow_up_days, sort_order, is_system)
+SELECT v.* FROM (VALUES
+  ('sales_leads','Sales & leads','#6366f1',2,10,true),
+  ('collections','Collections','#0d9488',3,20,true),
+  ('billing','Billing & invoicing','#0284c7',NULL::int,30,true),
+  ('licences','Licences & renewals','#d97706',7,40,true),
+  ('clients_support','Clients & support','#db2777',NULL::int,50,true),
+  ('delivery','Delivery','#16a34a',NULL::int,60,true),
+  ('finance_compliance','Finance & compliance','#64748b',NULL::int,70,true),
+  ('admin_hiring','Admin & hiring','#8b5cf6',NULL::int,80,true)
+) AS v(key, name, colour, default_follow_up_days, sort_order, is_system)
+WHERE NOT (SELECT task_defaults_seeded FROM company_settings WHERE id = 1)
+ON CONFLICT (key) DO NOTHING;
+INSERT INTO task_priorities (key, name, colour, rank, sort_order, is_system)
+SELECT v.* FROM (VALUES
+  ('critical','Critical','#dc2626',1,10,true),
+  ('high','High','#ea580c',2,20,true),
+  ('normal','Normal','#2563eb',3,30,true),
+  ('low','Low','#6b7280',4,40,true)
+) AS v(key, name, colour, rank, sort_order, is_system)
+WHERE NOT (SELECT task_defaults_seeded FROM company_settings WHERE id = 1)
+ON CONFLICT (key) DO NOTHING;
+UPDATE company_settings SET task_defaults_seeded = true WHERE id = 1 AND NOT task_defaults_seeded;

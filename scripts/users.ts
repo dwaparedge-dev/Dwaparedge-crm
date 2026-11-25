@@ -2,11 +2,18 @@
  * Staff account administration (there is no admin UI in v1).
  *
  *   npm run users -- list
- *   npm run users -- create  --email a@b.com --name "Asha"
+ *   npm run users -- create  --email a@b.com --name "Asha" [--grant tasks.view_all,tasks.assign]
  *   npm run users -- passwd  --email a@b.com        (resets the password and signs the user out everywhere)
  *   npm run users -- deactivate --email a@b.com     (blocks login and ends all sessions)
  *   npm run users -- activate   --email a@b.com
  *   npm run users -- events     [--email a@b.com]   (recent sign-in and account-security events)
+ *   npm run users -- permissions --email a@b.com    (the permissions the account holds; a new account holds none)
+ *   npm run users -- grant  --email a@b.com --permission tasks.view_all
+ *   npm run users -- revoke --email a@b.com --permission tasks.view_all
+ *
+ * Permission keys are listed in src/lib/auth/permissions.ts. A grant or revoke takes effect on the user's next request and is
+ * recorded in the activity log (as a command-line change: there is no signed-in actor here). `create --grant` applies only to a
+ * newly created account, never to one that already exists.
  *
  * Passwords are always typed at a hidden prompt, never passed on the command line or stored in shell history.
  */
@@ -14,6 +21,7 @@ import { createInterface } from "node:readline";
 import bcrypt from "bcryptjs";
 import pg from "pg";
 import { config } from "dotenv";
+import { listPermissions, parsePermissionList, setPermission } from "./users-permissions";
 config({ path: ".env.local" });
 config();
 
@@ -66,9 +74,15 @@ async function run() {
       case "create": {
         const name = flag("name")?.trim();
         if (!name) throw new Error("--name is required");
+        const grants = rest.includes("--grant") ? parsePermissionList(flag("grant") ?? "") : []; // checked before the password is asked for
         const hash = await bcrypt.hash(await newPassword(), rounds);
         const r = await pool.query("INSERT INTO users (name, email, password_hash) VALUES ($1,$2,$3) ON CONFLICT (lower(email)) DO NOTHING RETURNING id", [name, need(), hash]);
-        console.log(r.rowCount ? "User created." : "A user with that email already exists. Nothing changed.");
+        if (!r.rowCount) {
+          console.log("A user with that email already exists. Nothing changed.");
+          break;
+        }
+        for (const permission of grants) await setPermission(pool, need(), permission, true);
+        console.log(grants.length ? `User created with ${grants.join(", ")}.` : "User created.");
         break;
       }
       case "passwd": {
@@ -94,8 +108,26 @@ async function run() {
         console.table(rows.map((r) => ({ when: r.created_at.toISOString(), event: r.event, email: r.email, ip: r.ip })));
         break;
       }
+      case "permissions": {
+        const held = await listPermissions(pool, need());
+        console.log(held === null ? "No such user." : `${email}: ${held.length ? held.join(", ") : "no permissions"}`);
+        break;
+      }
+      case "grant":
+      case "revoke": {
+        const permission = flag("permission")?.trim();
+        if (!permission) throw new Error("--permission is required");
+        const on = command === "grant";
+        const result = await setPermission(pool, need(), permission, on);
+        console.log(
+          result === "no_user" ? "No such user."
+          : result === "changed" ? `${on ? "Granted" : "Revoked"} ${permission} ${on ? "to" : "from"} ${email}.`
+          : `${email} ${on ? "already has" : "does not have"} ${permission}. Nothing changed.`,
+        );
+        break;
+      }
       default:
-        console.log("Commands: list | create --email --name | passwd --email | deactivate --email | activate --email | events [--email]");
+        console.log("Commands: list | create --email --name [--grant a,b] | passwd --email | deactivate --email | activate --email | events [--email] | permissions --email | grant --email --permission | revoke --email --permission");
         process.exitCode = command ? 1 : 0;
     }
   } finally {
