@@ -76,6 +76,9 @@ async function assertClientExists(tx: Queryable, id: string): Promise<void> {
 
 /** The columns a change needs, read under the row lock. Times and dates are in the same text form `TaskRow` uses. */
 type LockedTask = {
+  origin: "manual" | "auto";
+  source_type: string | null;
+  source_id: string | null;
   title: string;
   description: string | null;
   category_id: string;
@@ -103,7 +106,7 @@ function assertCanEdit(actor: CurrentUser, t: LockedTask) {
  */
 export async function lockForChange(tx: Queryable, id: string, actor: CurrentUser, need: "view" | "edit"): Promise<LockedTask> {
   const { rows } = await tx.query<LockedTask>(
-    `SELECT t.title, t.description, t.category_id, t.priority_id, t.client_id, to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
+    `SELECT t.title, t.description, t.origin, t.source_type, t.source_id, t.category_id, t.priority_id, t.client_id, to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
             ${isoTime("t.follow_up_at")} AS follow_up_at, t.follow_up_every_days, t.status, t.owner_id,
             COALESCE(o.is_active, false) AS owner_active, t.created_by
      FROM tasks t LEFT JOIN users o ON o.id = t.owner_id
@@ -257,6 +260,10 @@ export async function updateTask(id: string, input: UpdateTaskInput, actor: Curr
 export async function setTaskStatus(id: string, input: TaskStatusInput, actor: CurrentUser, now: Date = new Date()): Promise<void> {
   await db.transaction(async (tx) => {
     const cur = await lockForChange(tx, id, actor, "edit");
+    // A demo-request task is closed by marking the request contacted, so the Desk and the Demo requests page cannot disagree.
+    if (input.status === "done" && cur.origin === "auto" && cur.source_type === "demo_request") {
+      throw new AppError("Use Mark contacted on this task", 409, "INVALID_TRANSITION");
+    }
     if (cur.status === input.status) throw new AppError(`This task is already marked ${STATUS_LABEL[input.status]}`, 409, "INVALID_TRANSITION");
 
     const newFollowUpAt = input.followUpAt ? followUpTime(input.followUpAt, now) : null;

@@ -173,7 +173,9 @@ export function DeskPage() {
   const rowProps = (task: TaskData, section: Section) => ({
     task, section, today: desk!.today, now, user, showCategory: view === "urgency", busy: busy.has(task.id),
     onOpen: (t: TaskData) => setOpenId(t.id),
-    onDone: (t: TaskData) => void setStatus(t, "done"),
+    onDone: (t: TaskData) => void (t.origin === "auto" && t.source_type === "demo_request"
+      ? act(t, () => api(`/api/tasks/${t.id}/mark-contacted`, { method: "POST", body: {} }), "Marked contacted")
+      : setStatus(t, "done")),
     onTake: (t: TaskData) => void take(t),
     onEdit: (t: TaskData) => setForm({ task: t }),
     onTime: (t: TaskData, mode: TimeMode) => setTiming({ task: t, mode }),

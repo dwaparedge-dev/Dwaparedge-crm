@@ -91,7 +91,7 @@ export function TaskRow({ task: t, section, today, now, user, showCategory, busy
 
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, justifySelf: { xs: "start", sm: "end" } }}>
         {canEdit && (
-          <Button size="small" variant="outlined" startIcon={<CheckIcon />} disabled={busy} onClick={() => onDone(t)} aria-label={`Done: ${t.title}`}>Done</Button>
+          <Button size="small" variant="outlined" startIcon={<CheckIcon />} disabled={busy} onClick={() => onDone(t)} aria-label={`${t.source_type === "demo_request" ? "Mark contacted" : "Done"}: ${t.title}`}>{t.origin === "auto" && t.source_type === "demo_request" ? "Mark contacted" : "Done"}</Button>
         )}
         {canEdit && (
           <Button size="small" variant="outlined" disabled={busy} onClick={() => onTime(t, "followup")} aria-label={`Follow up: ${t.title}`}>Follow up</Button>

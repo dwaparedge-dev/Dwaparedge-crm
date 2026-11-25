@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import type { PoolClient } from "pg";
 import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
@@ -210,7 +211,12 @@ const STATUS_LABEL: Record<DemoRequestStatus, string> = { new: "New", contacted:
 
 /** Moves a request to another status. Any status can follow any other (a request wrongly marked spam can be reopened). */
 export async function setDemoRequestStatus(id: string, input: DemoRequestStatusInput, actorId: string) {
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => setDemoRequestStatusIn(tx, id, input, actorId));
+}
+
+/** The same change inside a transaction the caller already holds (used when a task and its demo request must change together). */
+export async function setDemoRequestStatusIn(tx: PoolClient, id: string, input: DemoRequestStatusInput, actorId: string) {
+  {
     const { rows } = await tx.query<{ name: string; company: string; status: DemoRequestStatus }>(
       "SELECT name, company, status FROM demo_requests WHERE id = $1 FOR UPDATE",
       [id],
@@ -235,5 +241,5 @@ export async function setDemoRequestStatus(id: string, input: DemoRequestStatusI
       },
       tx,
     );
-  });
+  }
 }

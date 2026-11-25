@@ -75,6 +75,7 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `JWT_EXPIRES_IN_DAYS` | no (7) | Session lifetime |
 | `BCRYPT_SALT_ROUNDS` | no (12) | Password hashing cost (10-15) |
 | `RATE_LIMIT_SALT` | no | Salt for hashing emails/IPs in the login rate limiter |
+| `TASKS_AUTO_FROM` | no | Date (`YYYY-MM-DD`). Auto-raised tasks (new demo request, overdue invoice, licence expiring or lapsed, milestone ready to bill) stay **off until this is set**, and then only cover records dated on or after it. Review older ones with `npm run tasks:backfill` |
 | `DEMO_INTAKE_KEY` | no | Shared secret (32+ chars) the FactoOne site sends as `X-Intake-Key` when posting a demo request. Unset = the intake endpoint answers 503 |
 | `SEED_ADMIN_NAME/EMAIL/PASSWORD` | first run | Used only by `db:seed-admin` (password ≥ 12 chars) |
 
@@ -98,6 +99,7 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 | `npm run db:migrate` | Apply new numbered `db/migrations/*.sql` (one-off drops, renames, data fixes), each in a transaction |
 | `npm run db:seed-admin` | Create the first user from `SEED_ADMIN_*` (no-op if the email exists) |
 | `npm run users -- <command>` | `list`, `create` (optionally `--grant a,b`), `passwd`, `deactivate`, `activate`, `events`, and the task permissions `permissions`, `grant`, `revoke` (passwords typed at a hidden prompt). See [Staff accounts](#staff-accounts) |
+| `npm run tasks:backfill` | Needs `TASKS_AUTO_FROM`. Dry run: lists the auto-tasks that would be raised for records dated before it. Add `-- --apply` to create them, `-- --max-age-days N` to limit how old |
 | `npm run invoices:refresh` | Dry run: lists issued invoices whose line wording no longer matches their sale. Add `-- --apply` to regenerate them (earlier versions are kept) |
 
 ### Staff accounts
