@@ -110,6 +110,7 @@ export function DeskPage() {
   const [view, setView] = useState<View>(loadView);
   const [owner, setOwner] = useState("me");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
   const [sectionFilter, setSectionFilter] = useState<Section | null>(null);
   const [expanded, setExpanded] = useState<Partial<Record<Section, boolean>>>({});
   const [form, setForm] = useState<{ task?: TaskData } | null>(null);
@@ -138,7 +139,22 @@ export function DeskPage() {
 
   // A category chip left selected after its last task is gone stops filtering instead of hiding everything.
   const category = desk && desk.categories.some((c) => c.id === categoryFilter) ? categoryFilter : null;
-  const visible = useMemo(() => (desk ? filterSections(desk.sections, { categoryId: category, section: sectionFilter }) : null), [desk, category, sectionFilter]);
+  // The priorities of the tasks in view (highest first), with how many tasks each has; the chips are built from the tasks, so a
+  // priority nobody is using does not clutter the Desk.
+  const priorities = useMemo(() => {
+    const found = new Map<string, { id: string; name: string; colour: string; rank: number; count: number }>();
+    if (desk) for (const s of SECTION_ORDER) for (const t of desk.sections[s]) {
+      const p = found.get(t.priority_id);
+      if (p) p.count++;
+      else found.set(t.priority_id, { id: t.priority_id, name: t.priority_name, colour: t.priority_colour, rank: t.priority_rank, count: 1 });
+    }
+    return [...found.values()].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+  }, [desk]);
+  const priority = priorities.some((p) => p.id === priorityFilter) ? priorityFilter : null;
+  const visible = useMemo(
+    () => (desk ? filterSections(desk.sections, { categoryId: category, priorityId: priority, section: sectionFilter }) : null),
+    [desk, category, priority, sectionFilter],
+  );
   const blocks = useMemo(() => (desk && visible ? groupByCategory(visible, desk.categories) : []), [desk, visible]);
   const count = (sections: Record<Section, TaskData[]>) => SECTION_ORDER.reduce((n, s) => n + sections[s].length, 0);
   const total = desk ? count(desk.sections) : 0;
@@ -150,7 +166,7 @@ export function DeskPage() {
     if (s === "parked") setExpanded((e) => ({ ...e, parked: true }));
   };
   const isOpen = (s: Section) => expanded[s] ?? s !== "parked";
-  const clearFilters = () => { setCategoryFilter(null); setSectionFilter(null); };
+  const clearFilters = () => { setCategoryFilter(null); setPriorityFilter(null); setSectionFilter(null); };
 
   /** Runs one action on a task, then reads the Desk again (also after a failure: the task may have changed under us) and tells the badge. */
   async function act(task: TaskData, run: () => Promise<unknown>, success: string) {
@@ -237,6 +253,20 @@ export function DeskPage() {
             </Box>
           )}
 
+          {priorities.length > 1 && (
+            <Box role="group" aria-label="Filter by priority" sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1, mb: 3, mt: desk.categories.length > 0 ? -1.5 : 0 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", textTransform: "uppercase", letterSpacing: "0.5px", mr: 0.5 }}>Priority</Typography>
+              {priorities.map((p) => (
+                <Chip
+                  key={p.id} size="small" clickable aria-pressed={priority === p.id} label={`${p.name} · ${p.count}`}
+                  variant={priority === p.id ? "filled" : "outlined"}
+                  icon={<Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: p.colour, ml: "8px !important" }} />}
+                  onClick={() => setPriorityFilter(priority === p.id ? null : p.id)}
+                />
+              ))}
+            </Box>
+          )}
+
           {total === 0 ? (
             <EmptyState title="Nothing pending" hint="No open tasks in this view." action={<Button variant="contained" startIcon={<AddIcon />} onClick={() => setForm({})}>New task</Button>} />
           ) : shown === 0 ? (
@@ -257,16 +287,30 @@ export function DeskPage() {
               );
             })
           ) : (
-            blocks.map((b) => (
-              <Box component="section" key={b.id} sx={{ mb: 3 }}>
-                <Typography component="h2" variant="subtitle2" sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, py: 0.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "text.secondary" }}>
-                  <Box component="span" aria-hidden sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: b.colour }} />
-                  {b.name}
-                  <Chip size="small" label={b.tasks.length} sx={{ height: 20 }} />
-                </Typography>
-                <Rows label={b.name}>{b.tasks.map(({ task, section }) => <TaskRow key={task.id} {...rowProps(task, section)} />)}</Rows>
-              </Box>
-            ))
+            blocks.map((b) => {
+              if (b.parked) {
+                const lateParked = b.tasks.filter(({ task }) => task.due_date !== null && daysUntil(task.due_date, desk.today) < 0).length;
+                const note = `chased, back later${lateParked > 0 ? `; ${lateParked} already late` : ""}`;
+                return (
+                  <Box component="section" key={b.id} sx={{ mb: 3 }}>
+                    <SectionHeader section="parked" count={b.tasks.length} note={note} open={isOpen("parked")} onToggle={() => setExpanded((e) => ({ ...e, parked: !isOpen("parked") }))} />
+                    <Box id="desk-section-parked" hidden={!isOpen("parked")}>
+                      {isOpen("parked") && <Rows label={b.name}>{b.tasks.map(({ task, section }) => <TaskRow key={task.id} {...rowProps(task, section)} showCategory />)}</Rows>}
+                    </Box>
+                  </Box>
+                );
+              }
+              return (
+                <Box component="section" key={b.id} sx={{ mb: 3 }}>
+                  <Typography component="h2" variant="subtitle2" sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, py: 0.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "text.secondary" }}>
+                    <Box component="span" aria-hidden sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: b.colour }} />
+                    {b.name}
+                    <Chip size="small" label={b.tasks.length} sx={{ height: 20 }} />
+                  </Typography>
+                  <Rows label={b.name}>{b.tasks.map(({ task, section }) => <TaskRow key={task.id} {...rowProps(task, section)} />)}</Rows>
+                </Box>
+              );
+            })
           )}
         </Box>
       )}

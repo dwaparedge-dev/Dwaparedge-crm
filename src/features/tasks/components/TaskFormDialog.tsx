@@ -37,9 +37,18 @@ const FIELDS = Object.keys(formSchema.shape);
 
 interface Option { id: string; name: string }
 
+/** What a new task starts with when it is raised from another page (a client, a demo request). Ignored when editing. */
+export interface TaskInitial {
+  title?: string;
+  description?: string;
+  clientId?: string;
+}
+
 interface Props {
   /** The task to edit; leave out to create one. */
   task?: TaskRow;
+  /** Starting values for a new task. */
+  initial?: TaskInitial;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -53,7 +62,7 @@ interface FormProps extends Props {
 }
 
 /** New task, or edit one. The pickers load first, so the form opens with its defaults in place. */
-export function TaskFormDialog({ task, onClose, onSaved }: Props) {
+export function TaskFormDialog({ task, initial, onClose, onSaved }: Props) {
   const user = useCurrentUser();
   const assign = canAssign(user);
   const categories = useFetch<{ items: CategoryRow[] }>("/api/task-categories");
@@ -64,10 +73,10 @@ export function TaskFormDialog({ task, onClose, onSaved }: Props) {
   if (!categories.data || !priorities.data || (assign && !staff.data) || error) {
     return <LoadingDialog error={error} onRetry={() => { categories.reload(); priorities.reload(); staff.reload(); }} onClose={onClose} />;
   }
-  return <TaskForm task={task} onClose={onClose} onSaved={onSaved} categories={categories.data.items} priorities={priorities.data.items} staff={assign ? staff.data!.items : null} userId={user.id} />;
+  return <TaskForm task={task} initial={initial} onClose={onClose} onSaved={onSaved} categories={categories.data.items} priorities={priorities.data.items} staff={assign ? staff.data!.items : null} userId={user.id} />;
 }
 
-function TaskForm({ task, onClose, onSaved, categories, priorities, staff, userId }: FormProps) {
+function TaskForm({ task, initial, onClose, onSaved, categories, priorities, staff, userId }: FormProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const defaultPriority = priorities.find((p) => p.key === "normal") ?? priorities[Math.floor(priorities.length / 2)];
   const { register, handleSubmit, control, setError, formState: { errors, isSubmitting } } = useForm<FormInput, unknown, FormOutput>({
@@ -77,7 +86,10 @@ function TaskForm({ task, onClose, onSaved, categories, priorities, staff, userI
           title: task.title, description: task.description ?? "", categoryId: task.category_id, priorityId: task.priority_id,
           dueDate: task.due_date ?? "", clientId: task.client_id ?? "", ownerId: task.owner_id ?? "",
         }
-      : { title: "", description: "", categoryId: "", priorityId: defaultPriority?.id ?? "", dueDate: "", clientId: "", ownerId: userId },
+      : {
+          title: initial?.title ?? "", description: initial?.description ?? "", categoryId: "", priorityId: defaultPriority?.id ?? "",
+          dueDate: "", clientId: initial?.clientId ?? "", ownerId: userId,
+        },
   });
 
   // A task can still point at a category or priority that has since been hidden: keep it selectable so the box is not blank.

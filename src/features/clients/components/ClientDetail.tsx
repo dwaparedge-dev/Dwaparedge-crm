@@ -9,6 +9,7 @@ import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BusinessIcon from "@mui/icons-material/BusinessOutlined";
 import ContactsIcon from "@mui/icons-material/ContactsOutlined";
 import EditIcon from "@mui/icons-material/EditOutlined";
+import TaskAltIcon from "@mui/icons-material/TaskAltOutlined";
 import HandshakeIcon from "@mui/icons-material/HandshakeOutlined";
 import HistoryIcon from "@mui/icons-material/HistoryOutlined";
 import InfoIcon from "@mui/icons-material/InfoOutlined";
@@ -30,6 +31,8 @@ import { OptionLabel } from "@/features/options/components/OptionSelect";
 import { formatMoney } from "@/lib/format";
 import { stateNameByCode } from "@/lib/india";
 import { InvoicesList } from "@/features/invoices/components/InvoicesList";
+import { TaskFormDialog } from "@/features/tasks/components/TaskFormDialog";
+import { announceTasksChanged } from "@/features/tasks/useDeskCounts";
 import { LicensesList } from "@/features/licenses/components/LicensesList";
 import { PaymentsList } from "@/features/payments/components/PaymentsList";
 import { SalesList } from "@/features/sales/components/SalesList";
@@ -52,6 +55,7 @@ export function ClientDetail({ id }: { id: string }) {
   const sales = useFetch<SalesSummary>(`/api/sales?clientId=${id}&pageSize=1`);
   const [tab, setTab] = useState(0);
   const [editing, setEditing] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -114,6 +118,7 @@ export function ClientDetail({ id }: { id: string }) {
             actions={
               <HeroActions>
                 {!archived && <Button fullWidth variant="contained" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit client</Button>}
+                {!archived && <Button id="client-add-task" fullWidth variant="outlined" startIcon={<TaskAltIcon />} onClick={() => setAddingTask(true)}>Add follow-up task</Button>}
                 <Button fullWidth variant="outlined" color={archived ? "primary" : "error"} startIcon={archived ? <RestoreIcon /> : <ArchiveIcon />} onClick={() => setConfirm(true)}>
                   {archived ? "Restore" : "Archive"}
                 </Button>
@@ -215,6 +220,12 @@ export function ClientDetail({ id }: { id: string }) {
         onConfirm={toggleArchive}
         onClose={() => setConfirm(false)}
       />
+      {addingTask && c && (
+        <TaskFormDialog
+          initial={{ title: `Follow up: ${c.display_name}`, clientId: id }} onClose={() => setAddingTask(false)}
+          onSaved={() => { setAddingTask(false); notify.success("Task created. It is on your Desk."); announceTasksChanged(); }}
+        />
+      )}
       {editing && <ClientFormDialog clientId={id} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); docs.reload(); }} />}
     </>
   );
