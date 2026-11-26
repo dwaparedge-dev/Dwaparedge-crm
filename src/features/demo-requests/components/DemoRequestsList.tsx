@@ -70,7 +70,7 @@ export function DemoRequestsList({ initialStatus = "" }: { initialStatus?: strin
     { field: "owner_name", headerName: "Owner", width: 150, valueFormatter: (v: string | null) => v ?? "Unassigned" },
     { field: "status", headerName: "Status", width: 130, renderCell: ({ row: r }) => <DemoRequestStatusChip status={r.status} /> },
     ...(canDelete ? [{
-      field: "delete", headerName: "", width: 64, sortable: false, filterable: false, disableColumnMenu: true,
+      field: "delete", headerName: "Action", width: 90, sortable: false, filterable: false, disableColumnMenu: true,
       renderCell: ({ row: r }: { row: DemoRequestRow }) => (
         <Tooltip title="Delete permanently">
           <IconButton size="small" color="error" aria-label={`Delete the demo request from ${r.name}`} onClick={(e) => { e.stopPropagation(); setDeleting(r); }}><DeleteIcon fontSize="small" /></IconButton>
