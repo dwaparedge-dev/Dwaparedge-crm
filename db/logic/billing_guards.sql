@@ -2,6 +2,7 @@
 -- nothing is over-allocated. Defence in depth on top of the service layer. Safe to re-run.
 
 CREATE OR REPLACE FUNCTION guard_invoice_update() RETURNS trigger AS $$
+DECLARE amending BOOLEAN := COALESCE(current_setting('app.invoice_amend', true), '') = 'on';
 BEGIN
   IF OLD.status = 'draft' THEN
     RETURN NEW;
@@ -13,15 +14,20 @@ BEGIN
   IF NEW.status NOT IN ('issued','cancelled') THEN
     RAISE EXCEPTION 'An issued invoice cannot go back to %', NEW.status USING ERRCODE = 'check_violation';
   END IF;
+  -- While an invoice is being revised (the service sets the flag for its own transaction) the amounts and the printed
+  -- billing statement may change; the number, dates, parties, tax context and status stay frozen either way.
   IF ROW(NEW.client_id, NEW.sale_id, NEW.currency,
-         NEW.place_of_supply_state_code, NEW.supply_type, NEW.subtotal, NEW.cgst_total, NEW.sgst_total, NEW.igst_total,
-         NEW.tax_total, NEW.round_off, NEW.total, NEW.payment_terms, NEW.notes, NEW.client_snapshot, NEW.company_snapshot, NEW.document_snapshot,
+         NEW.place_of_supply_state_code, NEW.supply_type, NEW.payment_terms, NEW.notes, NEW.client_snapshot, NEW.company_snapshot,
          NEW.issued_at, NEW.issued_by)
      IS DISTINCT FROM
      ROW(OLD.client_id, OLD.sale_id, OLD.currency,
-         OLD.place_of_supply_state_code, OLD.supply_type, OLD.subtotal, OLD.cgst_total, OLD.sgst_total, OLD.igst_total,
-         OLD.tax_total, OLD.round_off, OLD.total, OLD.payment_terms, OLD.notes, OLD.client_snapshot, OLD.company_snapshot, OLD.document_snapshot,
+         OLD.place_of_supply_state_code, OLD.supply_type, OLD.payment_terms, OLD.notes, OLD.client_snapshot, OLD.company_snapshot,
          OLD.issued_at, OLD.issued_by) THEN
+    RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT amending AND ROW(NEW.subtotal, NEW.cgst_total, NEW.sgst_total, NEW.igst_total, NEW.tax_total, NEW.round_off, NEW.total, NEW.document_snapshot)
+     IS DISTINCT FROM
+     ROW(OLD.subtotal, OLD.cgst_total, OLD.sgst_total, OLD.igst_total, OLD.tax_total, OLD.round_off, OLD.total, OLD.document_snapshot) THEN
     RAISE EXCEPTION 'Issued invoice % is immutable', OLD.invoice_number USING ERRCODE = 'check_violation';
   END IF;
   -- The invoice date, the due date and the invoice number are the only things that may change after issue, and only while an
@@ -90,6 +96,10 @@ BEGIN
   SELECT status INTO parent_status FROM invoices WHERE id = COALESCE(NEW.invoice_id, OLD.invoice_id);
   -- parent_status is NULL while the parent is being cascade-deleted (only possible for drafts).
   IF parent_status IS NOT NULL AND parent_status <> 'draft' THEN
+    -- Revising an invoice's amount updates its lines in place; adding or removing lines stays impossible.
+    IF TG_OP = 'UPDATE' AND COALESCE(current_setting('app.invoice_amend', true), '') = 'on' THEN
+      RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'Items of an issued invoice cannot be changed' USING ERRCODE = 'check_violation';
   END IF;
   RETURN COALESCE(NEW, OLD);

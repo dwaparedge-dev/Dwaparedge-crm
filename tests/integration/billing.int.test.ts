@@ -137,6 +137,33 @@ describe("issued invoice immutability", () => {
   });
 });
 
+describe("amend flag", () => {
+  const withFlag = async <T>(fn: (tx: import("pg").PoolClient) => Promise<T>) => {
+    const { db } = await import("@/lib/db");
+    return db.transaction(async (tx) => {
+      await tx.query("SELECT set_config('app.invoice_amend', 'on', true)");
+      return fn(tx);
+    });
+  };
+  it("lets an issued invoice's lines and totals change only while the flag is on", async () => {
+    const { db } = await import("@/lib/db");
+    const { id } = await issuedInvoice(actor, intra);
+    await expect(db.query("UPDATE invoices SET total = 1 WHERE id = $1", [id])).rejects.toThrow(/immutable/);
+    await withFlag(async (tx) => {
+      await tx.query("UPDATE invoice_items SET unit_price = 500, taxable_amount = 500, line_total = 590 WHERE invoice_id = $1", [id]);
+      await tx.query("UPDATE invoices SET subtotal = 500, tax_total = 90, total = 590, document_snapshot = '{}'::jsonb WHERE id = $1", [id]);
+    });
+    expect((await db.queryOne<{ total: string }>("SELECT total FROM invoices WHERE id = $1", [id]))?.total).toBe("590.00");
+  });
+  it("still freezes the number, client and status, and keeps items from being added or removed", async () => {
+    const { id } = await issuedInvoice(actor, intra);
+    await expect(withFlag((tx) => tx.query("UPDATE invoices SET invoice_number = 'X' WHERE id = $1", [id]))).rejects.toThrow(/immutable/);
+    await expect(withFlag((tx) => tx.query("UPDATE invoices SET client_id = $2 WHERE id = $1", [id, inter]))).rejects.toThrow(/immutable/);
+    await expect(withFlag((tx) => tx.query("UPDATE invoices SET status = 'draft' WHERE id = $1", [id]))).rejects.toThrow(/cannot go back/);
+    await expect(withFlag((tx) => tx.query("DELETE FROM invoice_items WHERE invoice_id = $1", [id]))).rejects.toThrow(/cannot be changed/);
+  });
+});
+
 describe("sale to invoice", () => {
   it("copies the sale's items into a draft linked to the sale", async () => {
     const { getInvoice } = await import("@/features/invoices/service");
