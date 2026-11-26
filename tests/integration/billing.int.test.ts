@@ -281,6 +281,49 @@ describe("revising an issued invoice", () => {
     expect(await getInvoice(a.id)).toMatchObject({ total: "3540.00", version: 1 });
   });
 
+  it("does not blame the database setup for some other rule violation", async () => {
+    const { reviseInvoice } = await import("@/features/invoices/service");
+    const { db } = await import("@/lib/db");
+    const a = await issued3();
+    await db.query(`CREATE FUNCTION zz_other_rule() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'Some other rule says no' USING ERRCODE = 'check_violation'; END $$ LANGUAGE plpgsql`);
+    await db.query("CREATE TRIGGER zz_other BEFORE UPDATE ON invoice_items FOR EACH ROW EXECUTE FUNCTION zz_other_rule()");
+    try {
+      const failure = await reviseInvoice(a.id, "3000", "x", actor).then(() => null, (e) => e);
+      expect(failure).toMatchObject({ code: "23514" });
+      expect(failure.message).toMatch(/Some other rule says no/);
+    } finally {
+      await db.query("DROP TRIGGER zz_other ON invoice_items");
+      await db.query("DROP FUNCTION zz_other_rule()");
+    }
+  });
+
+  it("will not revise an invoice of a completed sale", async () => {
+    const { reviseInvoice, previewRevise, getInvoice } = await import("@/features/invoices/service");
+    const { setSaleStatus } = await import("@/features/sales/service");
+    const a = await issued3();
+    await setSaleStatus(a.saleId, "completed", actor);
+    await expectAppError(reviseInvoice(a.id, "3000", "x", actor), 409, "SALE_LOCKED");
+    expect((await previewRevise(a.id, "3000")).blocked).toMatch(/completed/i);
+    expect((await getInvoice(a.id)).total).toBe("3540.00");
+  });
+
+  it("tells the preview which invoices of the sale were issued after this one, and records them in the log", async () => {
+    const { issueInvoice, previewRevise, reviseInvoice } = await import("@/features/invoices/service");
+    const { db } = await import("@/lib/db");
+    const saleId = await confirmedSale(actor, intra, [LINE("1000", "18", "4")]);
+    const a = await bill(actor, saleId, { mode: "percent", percent: "50" });
+    const b = await bill(actor, saleId, { mode: "percent", percent: "50" });
+    await patchDraft(actor, a, { issueDate: "2026-10-05", dueDate: "2026-10-20" });
+    await patchDraft(actor, b, { issueDate: "2026-10-05", dueDate: "2026-10-20" });
+    await issueInvoice(a, actor);
+    const numberB = await issueInvoice(b, actor);
+    expect((await previewRevise(a, "2000")).laterInvoices).toEqual([{ id: b, invoice_number: numberB }]);
+    expect((await previewRevise(b, "2000")).laterInvoices).toEqual([]);
+    await reviseInvoice(a, "2000", "lower", actor);
+    const log = await db.queryOne<{ metadata: { laterInvoices: string[] } }>("SELECT metadata FROM activity_log WHERE entity_id = $1 AND action = 'revised'", [a]);
+    expect(log?.metadata.laterInvoices).toEqual([numberB]);
+  });
+
   it("previews the new amounts without changing anything", async () => {
     const { previewRevise, getInvoice } = await import("@/features/invoices/service");
     const a = await issued3();

@@ -33,6 +33,8 @@ interface Preview {
   allocated: string;
   /** Why it cannot be done, if so. */
   blocked: string | null;
+  /** Invoices of the sale issued after this one. */
+  laterInvoices: { id: string; invoice_number: string }[];
 }
 
 const MONEY = /^\d+(\.\d{1,2})?$/;
@@ -98,6 +100,12 @@ export function ReviseInvoiceDialog({ invoiceId, invoiceNumber, currentTotal, on
           </Box>
         )}
         {settled && p?.blocked && <Alert severity="error">{p.blocked}</Alert>}
+        {p && p.laterInvoices.length > 0 && !p.blocked && (
+          <Alert severity="info">
+            {p.laterInvoices.map((x) => x.invoice_number).join(", ")} {p.laterInvoices.length === 1 ? "was" : "were"} issued after this invoice and still {p.laterInvoices.length === 1 ? "shows" : "show"} the
+            old amount in its &ldquo;billed so far&rdquo; figures. Regenerate {p.laterInvoices.length === 1 ? "it" : "them"} afterwards to update that (not possible while payments are applied).
+          </Alert>
+        )}
         <TextField label="Reason" placeholder="e.g. Client agreed to pay 50,000 all-in" multiline minRows={2} value={reason} onChange={(e) => setReason(e.target.value)} slotProps={{ htmlInput: { maxLength: 500 } }} />
       </DialogContent>
       <DialogActions>

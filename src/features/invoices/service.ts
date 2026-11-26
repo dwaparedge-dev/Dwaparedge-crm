@@ -719,6 +719,8 @@ async function planRevision(id: string, newTotal: string, runner?: PoolClient) {
   const inv = await loadInvoice(id, runner);
   if (inv.status !== "issued") throw new AppError(`Only an issued invoice can be revised (this one is ${inv.status})`, 409, "INVALID_TRANSITION");
   if (!inv.supply_type) throw new AppError("This invoice has no GST supply type, so it cannot be revised", 409, "INVALID_TRANSITION");
+  const sale = await getSaleRow(inv.sale_id, runner);
+  if (sale.status !== "confirmed") throw new AppError(`Sale ${sale.sale_number} is ${sale.status}, so its invoices can no longer be revised`, 409, "SALE_LOCKED");
   const allocated = (await db.queryOne<{ paid: string }>("SELECT COALESCE(sum(amount), 0)::numeric(14,2) AS paid FROM payment_allocations WHERE invoice_id = $1 AND reversed_at IS NULL", [id], runner))!.paid;
   if (parseScaled(newTotal, 2) < parseScaled(allocated, 2)) {
     throw new AppError(`${allocated} is already paid on this invoice, so its total cannot be lowered below that. Reverse a payment allocation first if the client paid too much.`, 409, "BELOW_PAID");
@@ -778,7 +780,7 @@ export async function reviseInvoice(id: string, newTotal: string, reason: string
     } catch (e) {
       // A database that has not had `npm run db:sync` since this feature still locks the lines and totals. Do not run anything
       // else here: the transaction is already aborted and a further query would hide this reason behind a generic error.
-      if ((e as { code?: string }).code === "23514") {
+      if ((e as { code?: string }).code === "23514" && /cannot be changed|is immutable/.test((e as Error).message)) {
         throw new AppError("The database has not been updated for revising invoices yet. Run `npm run db:sync`, then try again.", 409, "DATABASE_OUT_OF_DATE");
       }
       throw e;
@@ -795,10 +797,17 @@ export async function reviseInvoice(id: string, newTotal: string, reason: string
     await logActivity({
       entityType: "invoice", entityId: id, clientId: cur.client_id, action: "revised",
       summary: `Invoice ${cur.invoice_number} revised (version ${version}): total ${plan.inv.total} to ${t.total}. ${why}`, actorId,
-      metadata: { version, from: plan.inv.total, to: t.total, fromSubtotal: plan.inv.subtotal, toSubtotal: t.subtotal },
+      metadata: { version, from: plan.inv.total, to: t.total, fromSubtotal: plan.inv.subtotal, toSubtotal: t.subtotal, laterInvoices: (await laterInvoices(id, cur.sale_id, plan.inv.issued_at, tx)).map((x) => x.invoice_number) },
     }, tx);
     return version;
   });
+}
+
+/** Invoices of the sale issued after this one: their printed "billed before" and balance figures do not follow a revise of this one. */
+async function laterInvoices(invoiceId: string, saleId: string, issuedAt: string | null, runner?: PoolClient) {
+  return db.query<{ id: string; invoice_number: string }>(
+    "SELECT id, invoice_number FROM invoices WHERE sale_id = $1 AND status = 'issued' AND id <> $2 AND issued_at > $3::timestamptz ORDER BY issued_at", [saleId, invoiceId, issuedAt], runner,
+  );
 }
 
 /** What revising to `newTotal` would do, without changing anything. A reason it cannot be done comes back in `blocked`. */
@@ -809,11 +818,11 @@ export async function previewRevise(id: string, newTotal: string) {
     try {
       const plan = await planRevision(id, total, tx);
       await assertWithinSale(tx, inv.sale_id, id, plan.items, plan.lines);
-      return { currentTotal: inv.total, newSubtotal: plan.totals.subtotal, newTax: plan.totals.tax, newRoundOff: plan.totals.roundOff, newTotal: plan.totals.total, allocated: plan.allocated, blocked: null as string | null };
+      return { currentTotal: inv.total, newSubtotal: plan.totals.subtotal, newTax: plan.totals.tax, newRoundOff: plan.totals.roundOff, newTotal: plan.totals.total, allocated: plan.allocated, blocked: null as string | null, laterInvoices: await laterInvoices(id, inv.sale_id, inv.issued_at, tx) };
     } catch (e) {
-      if (e instanceof AppError && ["BELOW_PAID", "REVISE_UNREACHABLE", "OVER_BILLED"].includes(e.code ?? "")) {
+      if (e instanceof AppError && ["BELOW_PAID", "REVISE_UNREACHABLE", "OVER_BILLED", "SALE_LOCKED"].includes(e.code ?? "")) {
         const allocated = (await tx.query<{ paid: string }>("SELECT COALESCE(sum(amount), 0)::numeric(14,2) AS paid FROM payment_allocations WHERE invoice_id = $1 AND reversed_at IS NULL", [id])).rows[0]!.paid;
-        return { currentTotal: inv.total, newSubtotal: inv.subtotal, newTax: inv.tax_total, newRoundOff: inv.round_off, newTotal: inv.total, allocated, blocked: e.message };
+        return { currentTotal: inv.total, newSubtotal: inv.subtotal, newTax: inv.tax_total, newRoundOff: inv.round_off, newTotal: inv.total, allocated, blocked: e.message, laterInvoices: await laterInvoices(id, inv.sale_id, inv.issued_at, tx) };
       }
       throw e;
     }
