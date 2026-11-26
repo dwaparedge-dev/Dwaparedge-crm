@@ -9,10 +9,10 @@ import { eachDay, REPORT_TZ, type ReportRange } from "./range";
 const bounds = (col: string) => `${col} >= $1::date::timestamp AT TIME ZONE '${REPORT_TZ}' AND ${col} < ($2::date + 1)::timestamp AT TIME ZONE '${REPORT_TZ}'`;
 const ENGAGED = "(page_count >= 2 OR active_s >= 10 OR custom_events > 0)";
 /** Optional country / device filter. $3 and $4 are always passed (null = no filter), so the SQL text never changes. `a` is the sessions alias, e.g. "s.". */
-const FILTER = (a = "") => `AND ($3::text IS NULL OR ${a}country = $3) AND ($4::text IS NULL OR ${a}device_type = $4)`;
+const FILTER = (a = "") => `AND ($3::text IS NULL OR ${a}country = $3) AND ($4::text IS NULL OR ${a}device_type = $4) AND ($5::text IS NULL OR ${a}region = $5) AND ($6::text IS NULL OR ${a}city = $6)`;
 
-export interface ReportFilters { country?: string; device?: string }
-const params = (r: { from: string; to: string }, f: ReportFilters) => [r.from, r.to, f.country ?? null, f.device ?? null];
+export interface ReportFilters { country?: string; device?: string; region?: string; city?: string }
+const params = (r: { from: string; to: string }, f: ReportFilters) => [r.from, r.to, f.country ?? null, f.device ?? null, f.region ?? null, f.city ?? null];
 
 export interface Kpis {
   visitors: number;
@@ -28,11 +28,13 @@ export interface Kpis {
   conversionRate: number;
 }
 export interface Count { label: string; sessions: number; visitors: number }
+/** One place. Parts the visitor's host could not work out are null (shown as "not available"). */
+export interface GeoRow { country: string | null; region: string | null; city: string | null; sessions: number; visitors: number; demoRequests: number }
 export interface Overview {
   range: ReportRange;
   /** When this report was computed (ISO). */
   generatedAt: string;
-  filters: { country: string | null; device: string | null };
+  filters: { country: string | null; device: string | null; region: string | null; city: string | null };
   /** Countries seen in this period, regardless of the country filter, for the filter's dropdown. */
   options: { countries: string[] };
   /** When data last arrived and how much came in the last 24 h: a silent tracker shows up here first. */
@@ -50,19 +52,17 @@ export interface Overview {
   referrers: { host: string; sessions: number }[];
   campaigns: { campaign: string; source: string; medium: string; sessions: number; demoRequests: number }[];
   countries: Count[];
-  regions: Count[];
-  cities: Count[];
+  regions: GeoRow[];
+  cities: GeoRow[];
   devices: Count[];
   browsers: Count[];
   os: Count[];
-  /** sessions by day of week (0 = Sunday) and hour of day (0-23), in IST */
-  heatmap: { dow: number; hour: number; sessions: number }[];
   funnel: { sessions: number; engaged: number; reachedContact: number; startedForm: number; requestedDemo: number };
 }
 
 async function kpis(q: Q, range: { from: string; to: string }, f: ReportFilters): Promise<Kpis> {
   const p = params(range, f);
-  const filtered = Boolean(f.country || f.device);
+  const filtered = Boolean(f.country || f.device || f.region || f.city);
   const [s, nv, dr] = await Promise.all([
     q<{ sessions: number; visitors: number; pageviews: number; avg_active: number; engaged: number; converted: number }>(
       `SELECT count(*)::int AS sessions, count(DISTINCT visitor_id)::int AS visitors, COALESCE(sum(page_count), 0)::int AS pageviews,
@@ -107,7 +107,7 @@ export async function getOverview(range: ReportRange, filters: ReportFilters = {
 async function buildOverview(q: Q, range: ReportRange, flt: ReportFilters): Promise<Overview> {
   const p = params(range, flt);
   const pPrev = params({ from: range.prevFrom, to: range.prevTo }, flt);
-  const [k, prev, live, daily, dailyPrev, health, countryOptions, pages, entry, sections, sources, geoC, geoR, geoCity, devices, browsers, os, heat, funnel] = await Promise.all([
+  const [k, prev, live, daily, dailyPrev, health, countryOptions, pages, entry, sections, sources, geoC, geoR, geoCity, devices, browsers, os, funnel] = await Promise.all([
     kpis(q, range, flt),
     kpis(q, { from: range.prevFrom, to: range.prevTo }, flt),
     q<{ n: number }>("SELECT count(DISTINCT visitor_id)::int AS n FROM analytics_sessions WHERE last_seen_at > now() - interval '5 minutes'"),
@@ -136,16 +136,15 @@ async function buildOverview(q: Q, range: ReportRange, flt: ReportFilters): Prom
               count(*) FILTER (WHERE demo_requested)::int AS converted
        FROM analytics_sessions WHERE ${bounds("started_at")} ${FILTER()} GROUP BY 1, 2, 3, 4`, p),
     q<Count>(top("Unknown", "country"), p),
-    q<Count>(`SELECT COALESCE(NULLIF(region, ''), 'Unknown') || CASE WHEN country IS NULL THEN '' ELSE ', ' || country END AS label, count(*)::int AS sessions, count(DISTINCT visitor_id)::int AS visitors
-       FROM analytics_sessions WHERE ${bounds("started_at")} ${FILTER()} GROUP BY region, country ORDER BY sessions DESC, label LIMIT 15`, p),
-    q<Count>(`SELECT COALESCE(NULLIF(city, ''), 'Unknown') || CASE WHEN region IS NULL THEN '' ELSE ', ' || region END AS label, count(*)::int AS sessions, count(DISTINCT visitor_id)::int AS visitors
-       FROM analytics_sessions WHERE ${bounds("started_at")} ${FILTER()} GROUP BY city, region ORDER BY sessions DESC, label LIMIT 15`, p),
+    q<GeoRow>(`SELECT country, NULLIF(region, '') AS region, NULL::text AS city, count(*)::int AS sessions, count(DISTINCT visitor_id)::int AS visitors,
+              count(*) FILTER (WHERE demo_requested)::int AS "demoRequests"
+       FROM analytics_sessions WHERE ${bounds("started_at")} ${FILTER()} GROUP BY country, NULLIF(region, '') ORDER BY sessions DESC, region NULLS LAST LIMIT 50`, p),
+    q<GeoRow>(`SELECT country, NULLIF(region, '') AS region, NULLIF(city, '') AS city, count(*)::int AS sessions, count(DISTINCT visitor_id)::int AS visitors,
+              count(*) FILTER (WHERE demo_requested)::int AS "demoRequests"
+       FROM analytics_sessions WHERE ${bounds("started_at")} ${FILTER()} GROUP BY country, NULLIF(region, ''), NULLIF(city, '') ORDER BY sessions DESC, city NULLS LAST LIMIT 100`, p),
     q<Count>(top("Unknown", "device_type"), p),
     q<Count>(top("Unknown", "browser"), p),
     q<Count>(top("Unknown", "os"), p),
-    q<{ dow: number; hour: number; sessions: number }>(
-      `SELECT extract(dow FROM started_at AT TIME ZONE '${REPORT_TZ}')::int AS dow, extract(hour FROM started_at AT TIME ZONE '${REPORT_TZ}')::int AS hour, count(*)::int AS sessions
-       FROM analytics_sessions WHERE ${bounds("started_at")} ${FILTER()} GROUP BY 1, 2`, p),
     q<{ sessions: number; engaged: number; reached: number; started: number; requested: number }>(
       `SELECT count(*)::int AS sessions, count(*) FILTER (WHERE ${ENGAGED})::int AS engaged,
               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM analytics_events e WHERE e.session_id = s.id AND e.name = 'section_contact'))::int AS reached,
@@ -173,7 +172,7 @@ async function buildOverview(q: Q, range: ReportRange, flt: ReportFilters): Prom
   const f = funnel[0]!;
   return {
     range, generatedAt: new Date().toISOString(), live: live[0]!.n, kpis: k, previous: prev,
-    filters: { country: flt.country ?? null, device: flt.device ?? null },
+    filters: { country: flt.country ?? null, device: flt.device ?? null, region: flt.region ?? null, city: flt.city ?? null },
     options: { countries: countryOptions.map((r) => r.country) },
     health: { lastEventAt: health[0]!.last_at, events24h: health[0]!.n },
     previousVisitors: eachDay(range.prevFrom, range.prevTo).map((d) => prevByDay.get(d)?.visitors ?? 0),
@@ -182,7 +181,7 @@ async function buildOverview(q: Q, range: ReportRange, flt: ReportFilters): Prom
     channels: [...channelMap].map(([channel, v]) => ({ channel, ...v })).filter((c) => c.sessions > 0).sort((a, b) => b.sessions - a.sessions),
     referrers: [...referrerMap].map(([host, sessions]) => ({ host, sessions })).sort((a, b) => b.sessions - a.sessions).slice(0, 15),
     campaigns: [...campaignMap.values()].sort((a, b) => b.sessions - a.sessions).slice(0, 15),
-    countries: geoC, regions: geoR, cities: geoCity, devices, browsers, os, heatmap: heat,
+    countries: geoC, regions: geoR, cities: geoCity, devices, browsers, os,
     funnel: { sessions: f.sessions, engaged: f.engaged, reachedContact: f.reached, startedForm: f.started, requestedDemo: f.requested },
   };
 }
@@ -219,7 +218,7 @@ export async function listSessions(range: ReportRange, opts: { page: number; pag
     db.query<Omit<SessionRow, "channel"> & { utm_medium: string | null; utm_source: string | null }>(
       `SELECT s.id, s.started_at, s.country, s.region, s.city, s.device_type, s.browser, s.os, s.referrer_host, s.utm_source, s.utm_medium, s.utm_campaign,
               s.entry_path, s.exit_path, s.page_count, s.active_s, s.demo_requested, lead.id AS lead_id, lead.company AS lead_company
-       ${from} WHERE ${where} ORDER BY s.started_at DESC LIMIT $5 OFFSET $6`, [...p, opts.pageSize, (opts.page - 1) * opts.pageSize]),
+       ${from} WHERE ${where} ORDER BY s.started_at DESC LIMIT $7 OFFSET $8`, [...p, opts.pageSize, (opts.page - 1) * opts.pageSize]),
     db.query<{ n: number }>(`SELECT count(*)::int AS n ${from} WHERE ${where}`, p),
   ]);
   return {

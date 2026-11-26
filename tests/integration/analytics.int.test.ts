@@ -130,6 +130,40 @@ describe("report filters, comparison and health", () => {
   });
 });
 
+describe("location drill-down: country, state, city", () => {
+  it("rolls visits up to states and cities, and narrows every figure by state and by city", async () => {
+    const { getOverview, listSessions } = await import("@/features/analytics/reports");
+    const { resolveRange } = await import("@/features/analytics/range");
+    const place = (country: string, region: string, city: string) => batch({ country, region, city });
+    // Country code "NZ" is not used by any other test, so these counts are exact.
+    await send(place("NZ", "Auckland", "Auckland")); await send(place("NZ", "Auckland", "Auckland")); await send(place("NZ", "Auckland", "Manukau"));
+    await send(place("NZ", "Wellington", "Wellington"));
+    await send(batch({ country: "NZ", region: undefined, city: undefined })); // the host could not tell the state or city
+    const range = resolveRange({ range: "today" });
+
+    const nz = await getOverview(range, { country: "NZ" });
+    expect(nz.kpis.sessions).toBe(5);
+    const regions = Object.fromEntries(nz.regions.map((r) => [r.region ?? "(none)", r.sessions]));
+    expect(regions).toEqual({ Auckland: 3, Wellington: 1, "(none)": 1 });
+    expect(nz.cities.find((c) => c.city === "Auckland")).toMatchObject({ country: "NZ", region: "Auckland", sessions: 2 });
+    expect(nz.cities.find((c) => c.city === null)).toMatchObject({ sessions: 1 }); // kept, and shown as "not available", not dropped
+
+    const auckland = await getOverview(range, { country: "NZ", region: "Auckland" });
+    expect(auckland.kpis.sessions).toBe(3);
+    expect(auckland.cities.map((c) => c.city).sort()).toEqual(["Auckland", "Manukau"]);
+    expect(auckland.daily.reduce((a, d) => a + d.sessions, 0)).toBe(3);
+
+    const manukau = await getOverview(range, { country: "NZ", region: "Auckland", city: "Manukau" });
+    expect(manukau.kpis.sessions).toBe(1);
+    expect(manukau.funnel.sessions).toBe(1);
+    expect(manukau.filters).toMatchObject({ country: "NZ", region: "Auckland", city: "Manukau" });
+
+    const list = await listSessions(range, { page: 1, pageSize: 20, filters: { country: "NZ", city: "Wellington" } });
+    expect(list.total).toBe(1);
+    expect(list.items[0]).toMatchObject({ city: "Wellington", region: "Wellington", country: "NZ" });
+  });
+});
+
 describe("reports", () => {
   it("counts visits, visitors, channels, countries, funnel and live visitors for today", async () => {
     const { getOverview, listSessions } = await import("@/features/analytics/reports");

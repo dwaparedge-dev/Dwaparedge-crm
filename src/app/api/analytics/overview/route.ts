@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   try {
     requireAnalyticsView(await requireUser());
     const q = reportQuerySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
-    return NextResponse.json(await getOverview(parseRange(q), { country: q.country, device: q.device }));
+    return NextResponse.json(await getOverview(parseRange(q), { country: q.country, device: q.device, region: q.region, city: q.city }));
   } catch (error) {
     return errorResponse(error);
   }

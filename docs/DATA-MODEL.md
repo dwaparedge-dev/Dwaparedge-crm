@@ -82,3 +82,5 @@ Three tables, written only for visitors who pressed Accept on the website. Delet
 **Never stored:** IP address, full User-Agent, query strings, form contents, keystrokes. **Retention:** `ANALYTICS_RETENTION_DAYS` (default 395); `npm run analytics:purge` erases older rows. **Erasure:** the website's "turn off" button calls `POST /api/intake/analytics/forget`; deleting a demo request also erases its linked browser's analytics.
 
 Reports read the `analytics_sessions` rows directly (indexed by start time); add a daily roll-up table if a period query ever becomes slow.
+
+**Location detail:** `analytics_sessions` keeps country (2-letter code), region (state, spelled out for Indian states) and city, as supplied by the web host; any part can be null when the host cannot tell. The report rolls them up country, then state, then city.

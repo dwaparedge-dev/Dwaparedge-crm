@@ -29,17 +29,18 @@ import { DataTable } from "@/components/common/DataTable";
 import { useFetch } from "@/components/common/useFetch";
 import ChartCard from "@/components/shared/ChartCard";
 import CommonLineAreaChart from "@/components/shared/charts/CommonLineAreaChart";
+import CommonPieChart from "@/components/shared/charts/CommonPieChart";
 import { useCurrentUser } from "@/components/layout/CurrentUserContext";
 import { hasPermission } from "@/lib/auth/permissions";
 import type { Overview, SessionRow } from "../reports";
-import { countryName, duration, pct, SECTION_LABEL } from "../format";
+import { countryName, duration, pct, placeLabel, SECTION_LABEL } from "../format";
 import { delta, funnelSteps, reportCsv } from "../insights";
 import { BarList, downloadCsv } from "./BarList";
+import { LocationsView } from "./LocationsView";
 
 const RANGES = [{ value: "today", label: "Today" }, { value: "7d", label: "7 days" }, { value: "30d", label: "30 days" }, { value: "90d", label: "90 days" }];
-const VIEWS = [{ value: "overview", label: "Overview" }, { value: "sources", label: "Traffic sources" }, { value: "pages", label: "Pages" }, { value: "audience", label: "Audience" }, { value: "visits", label: "Visits" }];
+const VIEWS = [{ value: "overview", label: "Overview" }, { value: "sources", label: "Traffic sources" }, { value: "pages", label: "Pages" }, { value: "locations", label: "Locations" }, { value: "audience", label: "Devices" }, { value: "visits", label: "Visits" }];
 const DEVICES = ["desktop", "mobile", "tablet"];
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const rows = (list: { label: string; sessions: number }[]) => list.map((r) => ({ label: r.label, value: r.sessions }));
 const pick = (v: string | null, allowed: string[], fallback: string) => (v && allowed.includes(v) ? v : fallback);
 
@@ -64,26 +65,20 @@ function Funnel({ f }: { f: Overview["funnel"] }) {
   );
 }
 
-function Heatmap({ cells }: { cells: Overview["heatmap"] }) {
-  const grid = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c.sessions]));
-  const max = Math.max(1, ...cells.map((c) => c.sessions));
+const CITY_COLORS = ["#1e293b", "#38bdf8", "#6366f1", "#10b981", "#f59e0b", "#ef4444", "#a855f7", "#94a3b8"];
+
+/** Share of visits by city: the top 7 and the rest grouped, each named with its country code so two cities with one name stay apart. */
+function CityChart({ cities }: { cities: Overview["cities"] }) {
+  const named = cities.map((c) => ({ label: c.city ? `${c.city}${c.country ? ` (${c.country})` : ""}` : "City not available", value: c.sessions }));
+  const top = named.slice(0, 7);
+  const rest = named.slice(7).reduce((a, c) => a + c.value, 0);
+  const slices = rest ? [...top, { label: "Other cities", value: rest }] : top;
   return (
-    <ChartCard title="When people visit" subtitle="Visits by day and hour (India time). Darker = more visits">
-      <Box sx={{ overflowX: "auto" }}>
-        <Box sx={{ display: "grid", gridTemplateColumns: "36px repeat(24, minmax(14px, 1fr))", gap: "2px", minWidth: 520 }}>
-          <Box />
-          {Array.from({ length: 24 }, (_, h) => <Typography key={h} variant="caption" sx={{ textAlign: "center", fontSize: 9, color: "text.secondary" }}>{h % 3 === 0 ? h : ""}</Typography>)}
-          {DAYS.map((d, dow) => (
-            <Box key={d} sx={{ display: "contents" }}>
-              <Typography variant="caption" sx={{ color: "text.secondary", lineHeight: "16px" }}>{d}</Typography>
-              {Array.from({ length: 24 }, (_, h) => {
-                const n = grid.get(`${dow}-${h}`) ?? 0;
-                return <Box key={h} title={`${d} ${h}:00, ${n} visit${n === 1 ? "" : "s"}`} sx={{ height: 16, borderRadius: "3px", bgcolor: n ? "primary.main" : "action.hover", opacity: n ? 0.15 + 0.85 * (n / max) : 1 }} />;
-              })}
-            </Box>
-          ))}
-        </Box>
-      </Box>
+    <ChartCard title="Visits by city" subtitle="Share of visits from each city. The Locations tab goes from country to state to city">
+      {slices.length === 0 ? <Typography variant="body2" color="text.secondary" sx={{ py: 3, textAlign: "center" }}>No city data yet. The website&apos;s host supplies the city.</Typography> : (
+        <CommonPieChart id="analytics-city-chart" type="donut" height={300} legend="bottom" colors={CITY_COLORS}
+          labels={slices.map((s) => s.label)} values={slices.map((s) => s.value)} valueFormatter={(v) => String(Math.round(v))} showExport={false} />
+      )}
     </ChartCard>
   );
 }
@@ -135,6 +130,8 @@ export function AnalyticsDashboard() {
   const range = pick(sp.get("range"), RANGES.map((r) => r.value), "30d");
   const country = /^[A-Za-z]{2}$/.test(sp.get("country") ?? "") ? sp.get("country")!.toUpperCase() : "";
   const device = pick(sp.get("device"), DEVICES, "");
+  const region = (sp.get("region") ?? "").slice(0, 100);
+  const city = (sp.get("city") ?? "").slice(0, 100);
   const set = (patch: Record<string, string>) => {
     const next = new URLSearchParams(sp.toString());
     for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
@@ -144,6 +141,8 @@ export function AnalyticsDashboard() {
   const q = new URLSearchParams({ range });
   if (country) q.set("country", country);
   if (device) q.set("device", device);
+  if (region) q.set("region", region);
+  if (city) q.set("city", city);
   const qs = q.toString();
   const { data, error, loading, reload } = useFetch<Overview>(canView ? `/api/analytics/overview?${qs}` : null);
 
@@ -151,7 +150,7 @@ export function AnalyticsDashboard() {
 
   const k = data?.kpis; const p = data?.previous;
   const countries = data ? [...new Set([...data.options.countries, ...(country ? [country] : [])])] : country ? [country] : [];
-  const filtered = Boolean(country || device);
+  const filtered = Boolean(country || device || region || city);
   const showMarkers = (data?.daily.length ?? 0) <= 14;
   return (
     <>
@@ -162,7 +161,7 @@ export function AnalyticsDashboard() {
         <SegmentedTabs value={range} onChange={(v) => set({ range: v === "30d" ? "" : v })} tabs={RANGES} />
       </Box>
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5, alignItems: "center", mb: 2.5 }}>
-        <TextField id="analytics-country" select size="small" label="Country" value={country} onChange={(e) => set({ country: e.target.value })} sx={{ minWidth: 170 }}>
+        <TextField id="analytics-country" select size="small" label="Country" value={country} onChange={(e) => set({ country: e.target.value, region: "", city: "" })} sx={{ minWidth: 170 }}>
           <MenuItem value="">All countries</MenuItem>
           {countries.map((c) => <MenuItem key={c} value={c}>{countryName(c)}</MenuItem>)}
         </TextField>
@@ -170,7 +169,9 @@ export function AnalyticsDashboard() {
           <MenuItem value="">All devices</MenuItem>
           {DEVICES.map((d) => <MenuItem key={d} value={d} sx={{ textTransform: "capitalize" }}>{d}</MenuItem>)}
         </TextField>
-        {filtered && <Button id="analytics-clear" size="small" onClick={() => set({ country: "", device: "" })}>Clear filters</Button>}
+        {region && <Chip id="analytics-region-chip" size="small" label={`State: ${region}`} onDelete={() => set({ region: "", city: "" })} />}
+        {city && <Chip id="analytics-city-chip" size="small" label={`City: ${city}`} onDelete={() => set({ city: "" })} />}
+        {filtered && <Button id="analytics-clear" size="small" onClick={() => set({ country: "", device: "", region: "", city: "" })}>Clear filters</Button>}
         <Box sx={{ flexGrow: 1 }} />
         {data && <Typography variant="caption" color="text.secondary">{data.range.from === data.range.to ? data.range.from : `${data.range.from} to ${data.range.to}`} · updated {format(new Date(data.generatedAt), "hh:mm a")}</Typography>}
         <Tooltip title="Refresh"><span><IconButton id="analytics-refresh" size="small" aria-label="Refresh the report" onClick={reload} disabled={loading}><RefreshIcon fontSize="small" /></IconButton></span></Tooltip>
@@ -206,9 +207,9 @@ export function AnalyticsDashboard() {
                     </ChartCard>
                   </Grid>
                   <Grid size={{ xs: 12, md: 6 }}><Funnel f={data.funnel} /></Grid>
-                  <Grid size={{ xs: 12, md: 6 }}><Heatmap cells={data.heatmap} /></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><CityChart cities={data.cities} /></Grid>
                   <Grid size={{ xs: 12, md: 6 }}><BarList id="channels" title="Where visitors come from" rows={rows(data.channels.map((c) => ({ label: c.channel, sessions: c.sessions })))} /></Grid>
-                  <Grid size={{ xs: 12, md: 6 }}><BarList id="countries" title="Top countries" rows={rows(data.countries.map((c) => ({ label: countryName(c.label === "Unknown" ? null : c.label), sessions: c.sessions })))} /></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><BarList id="top-cities" title="Top cities" subtitle="See the Locations tab to go from country to state to city" rows={data.cities.slice(0, 10).map((c) => ({ label: placeLabel(c), value: c.sessions }))} empty="No city data yet. The website's host supplies the city." /></Grid>
                 </Grid>
               )}
               {view === "sources" && (
@@ -225,11 +226,9 @@ export function AnalyticsDashboard() {
                   <Grid size={{ xs: 12 }}><BarList id="sections" title="Sections scrolled into view" subtitle="Visits that reached each part of the home page" rows={data.sections.map((s) => ({ label: SECTION_LABEL[s.name] ?? s.name, value: s.sessions }))} /></Grid>
                 </Grid>
               )}
+              {view === "locations" && <LocationsView data={data} onDrill={(d) => set({ country: d.country ?? "", region: d.region ?? "", city: d.city ?? "" })} />}
               {view === "audience" && (
                 <Grid container spacing={2.5}>
-                  <Grid size={{ xs: 12, md: 4 }}><BarList id="countries" title="Countries" rows={rows(data.countries.map((c) => ({ label: countryName(c.label === "Unknown" ? null : c.label), sessions: c.sessions })))} /></Grid>
-                  <Grid size={{ xs: 12, md: 4 }}><BarList id="regions" title="States / regions" rows={rows(data.regions)} /></Grid>
-                  <Grid size={{ xs: 12, md: 4 }}><BarList id="cities" title="Cities" rows={rows(data.cities)} /></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><BarList id="devices" title="Devices" rows={rows(data.devices)} /></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><BarList id="browsers" title="Browsers" rows={rows(data.browsers)} /></Grid>
                   <Grid size={{ xs: 12, md: 4 }}><BarList id="os" title="Operating systems" rows={rows(data.os)} /></Grid>

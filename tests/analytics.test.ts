@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { addDays, eachDay, resolveRange, todayIst } from "@/features/analytics/range";
 import { classifyChannel } from "@/features/analytics/channels";
 import { analyticsBatchSchema } from "@/features/analytics/schema";
-import { change, countryName, duration, pct, toCsv } from "@/features/analytics/format";
+import { change, countryName, duration, pct, placeLabel, toCsv } from "@/features/analytics/format";
 import { hasPermission } from "@/lib/auth/permissions";
 import { visibleNavGroups } from "@/components/layout/nav";
 
@@ -98,6 +98,12 @@ describe("display helpers", () => {
     expect(change(12, 10)).toBe("+20%"); expect(change(5, 10)).toBe("-50%"); expect(change(3, 0)).toBe("new"); expect(change(0, 0)).toBe("");
   });
   it("names countries", () => { expect(countryName("IN")).toBe("India"); expect(countryName(null)).toBe("Unknown"); });
+  it("writes a place as city, state, country and skips what the host could not tell", () => {
+    expect(placeLabel({ city: "Ahmedabad", region: "Gujarat", country: "IN" })).toBe("Ahmedabad, Gujarat, India");
+    expect(placeLabel({ region: "Gujarat", country: "IN" })).toBe("Gujarat, India");
+    expect(placeLabel({ country: "US" })).toBe("United States");
+    expect(placeLabel({})).toBe("Location not available");
+  });
   it("quotes CSV cells and defuses spreadsheet formulas", () => {
     expect(toCsv([["a,b", 1], ['say "hi"', 2]])).toBe('"a,b","1"\r\n"say ""hi""","2"');
     expect(toCsv([["=HYPERLINK(\"x\")"]])).toBe('"\'=HYPERLINK(""x"")"');
@@ -124,15 +130,14 @@ import type { Overview } from "@/features/analytics/reports";
 const kpi = (over: Partial<Overview["kpis"]> = {}): Overview["kpis"] => ({ visitors: 40, newVisitors: 30, sessions: 50, pageviews: 90, avgActiveSeconds: 75, engagedRate: 0.6, bounceRate: 0.4, demoRequests: 2, conversionRate: 0.04, ...over });
 const overview = (over: Partial<Overview> = {}): Overview => ({
   range: { from: "2026-11-01", to: "2026-11-07", days: 7, prevFrom: "2026-10-25", prevTo: "2026-10-31" }, generatedAt: "2026-11-07T10:00:00Z",
-  filters: { country: null, device: null }, options: { countries: ["IN", "US"] }, health: { lastEventAt: "2026-11-07T09:59:00Z", events24h: 120 }, previousVisitors: [1, 2, 3, 4, 5, 6, 7],
+  filters: { country: null, device: null, region: null, city: null }, options: { countries: ["IN", "US"] }, health: { lastEventAt: "2026-11-07T09:59:00Z", events24h: 120 }, previousVisitors: [1, 2, 3, 4, 5, 6, 7],
   live: 2, kpis: kpi(), previous: kpi({ visitors: 20, sessions: 25 }),
   daily: [{ date: "2026-11-01", visitors: 3, sessions: 4, pageviews: 6 }, { date: "2026-11-02", visitors: 9, sessions: 12, pageviews: 20 }],
   topPages: [{ path: "/", views: 80, visitors: 38 }], entryPages: [{ path: "/", sessions: 50 }], sections: [{ name: "section_contact", sessions: 10 }],
   channels: [{ channel: "Organic search", sessions: 30, visitors: 25, demoRequests: 1 }, { channel: "Direct", sessions: 20, visitors: 15, demoRequests: 1 }],
   referrers: [{ host: "www.google.com", sessions: 30 }], campaigns: [{ campaign: "launch", source: "linkedin", medium: "social", sessions: 8, demoRequests: 1 }],
-  countries: [{ label: "IN", sessions: 45, visitors: 36 }], regions: [{ label: "Gujarat, IN", sessions: 30, visitors: 25 }], cities: [{ label: "Ahmedabad, Gujarat", sessions: 25, visitors: 20 }],
+  countries: [{ label: "IN", sessions: 45, visitors: 36 }], regions: [{ country: "IN", region: "Gujarat", city: null, sessions: 30, visitors: 25, demoRequests: 1 }], cities: [{ country: "IN", region: "Gujarat", city: "Ahmedabad", sessions: 25, visitors: 20, demoRequests: 1 }],
   devices: [{ label: "desktop", sessions: 40, visitors: 30 }], browsers: [{ label: "Chrome", sessions: 40, visitors: 30 }], os: [{ label: "macOS", sessions: 20, visitors: 15 }],
-  heatmap: [{ dow: 4, hour: 21, sessions: 9 }, { dow: 1, hour: 10, sessions: 3 }],
   funnel: { sessions: 50, engaged: 30, reachedContact: 12, startedForm: 6, requestedDemo: 2 }, ...over,
 });
 
@@ -159,10 +164,13 @@ describe("funnel steps", () => {
 
 describe("full report CSV", () => {
   it("has every table, the period, the filters and the consent note, and defuses formulas", () => {
-    const csv = reportCsv(overview({ filters: { country: "IN", device: "mobile" }, referrers: [{ host: "=cmd|' /C calc'!A0", sessions: 1 }] }));
+    const csv = reportCsv(overview({ filters: { country: "IN", device: "mobile", region: "Gujarat", city: "Surat" }, referrers: [{ host: "=cmd|' /C calc'!A0", sessions: 1 }] }));
     for (const t of ['"Summary"', '"Day"', '"Funnel step"', '"Channel"', '"Campaign"', '"Page"', '"Section reached"', '"City"', '"Operating system"']) expect(csv).toContain(t);
     expect(csv).toContain('"Country filter","India"');
     expect(csv).toContain('"Device filter","mobile"');
+    expect(csv).toContain('"State filter","Gujarat"');
+    expect(csv).toContain('"City filter","Surat"');
+    expect(csv).toContain('"Ahmedabad","Gujarat","India","25","20","1"');
     expect(csv).toContain("Only visitors who accepted analytics are counted");
     expect(csv).toContain(`"'=cmd|' /C calc'!A0"`);
     expect(csv).not.toMatch(/"=cmd/);

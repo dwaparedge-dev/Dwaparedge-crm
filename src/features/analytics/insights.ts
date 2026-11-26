@@ -27,7 +27,7 @@ export function reportCsv(o: Overview): string {
   const k = o.kpis, p = o.previous;
   const rows: (string | number)[][] = [
     ["DwaparEdge website analytics"], ["Period (India time)", o.range.from, o.range.to],
-    ["Country filter", o.filters.country ? countryName(o.filters.country) : "All"], ["Device filter", o.filters.device ?? "All"],
+    ["Country filter", o.filters.country ? countryName(o.filters.country) : "All"], ["State filter", o.filters.region ?? "All"], ["City filter", o.filters.city ?? "All"], ["Device filter", o.filters.device ?? "All"],
     ["Note", "Only visitors who accepted analytics are counted"], [],
     ["Summary", "This period", "Previous period"],
     ["Visitors", k.visitors, p.visitors], ["New visitors", k.newVisitors, p.newVisitors], ["Visits", k.sessions, p.sessions], ["Page views", k.pageviews, p.pageviews],
@@ -42,8 +42,8 @@ export function reportCsv(o: Overview): string {
     ["Entry page", "Visits"], ...o.entryPages.map((r) => [r.path, r.sessions]), [],
     ["Section reached", "Visits"], ...o.sections.map((s) => [SECTION_LABEL[s.name] ?? s.name, s.sessions]), [],
     ["Country", "Visits", "Visitors"], ...o.countries.map((c) => [countryName(c.label === "Unknown" ? null : c.label), c.sessions, c.visitors]), [],
-    ["Region", "Visits", "Visitors"], ...o.regions.map((c) => [c.label, c.sessions, c.visitors]), [],
-    ["City", "Visits", "Visitors"], ...o.cities.map((c) => [c.label, c.sessions, c.visitors]), [],
+    ["State / region", "Country", "Visits", "Visitors", "Demo requests"], ...o.regions.map((c) => [c.region ?? "not available", c.country ? countryName(c.country) : "not available", c.sessions, c.visitors, c.demoRequests]), [],
+    ["City", "State / region", "Country", "Visits", "Visitors", "Demo requests"], ...o.cities.map((c) => [c.city ?? "not available", c.region ?? "not available", c.country ? countryName(c.country) : "not available", c.sessions, c.visitors, c.demoRequests]), [],
     ["Device", "Visits"], ...o.devices.map((c) => [c.label, c.sessions]), [],
     ["Browser", "Visits"], ...o.browsers.map((c) => [c.label, c.sessions]), [],
     ["Operating system", "Visits"], ...o.os.map((c) => [c.label, c.sessions]),

@@ -55,6 +55,9 @@ export const reportQuerySchema = z.object({
   /** Narrow every number on the report to one country (2-letter code) and/or one device type. Blank = everything. */
   country: z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^[A-Za-z]{2}$/).transform((x) => x.toUpperCase()).optional()),
   device: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["desktop", "mobile", "tablet"]).optional()),
+  /** Drill-down: a state / region and a city, exactly as stored (the Locations view sends what it was given). */
+  region: z.preprocess((v) => (v === "" ? undefined : v), z.string().transform(cleanText).pipe(z.string().min(1).max(100)).optional()),
+  city: z.preprocess((v) => (v === "" ? undefined : v), z.string().transform(cleanText).pipe(z.string().min(1).max(100)).optional()),
 });
 
 export const sessionListSchema = reportQuerySchema.extend({

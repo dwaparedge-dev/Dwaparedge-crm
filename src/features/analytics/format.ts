@@ -37,3 +37,9 @@ export function countryName(code: string | null | undefined): string {
 export const SECTION_LABEL: Record<string, string> = {
   section_about: "About", section_products: "Platform", section_approach: "How we work", section_why: "Why switch", section_founders: "Founders", section_contact: "Contact form",
 };
+
+/** "Ahmedabad, Gujarat, India"; parts the host could not determine are skipped, and nothing at all reads "Location not available". */
+export function placeLabel(p: { city?: string | null; region?: string | null; country?: string | null }): string {
+  const parts = [p.city, p.region, p.country ? countryName(p.country) : null].filter((x): x is string => Boolean(x));
+  return parts.length ? parts.join(", ") : "Location not available";
+}
