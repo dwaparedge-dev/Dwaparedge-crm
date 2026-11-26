@@ -92,7 +92,16 @@ const top = (label: string, col: string, extra = "") =>
 export async function getOverview(range: ReportRange, filters: ReportFilters = {}): Promise<Overview> {
   // All of the report's queries share ONE database connection (they queue on it). Run in parallel on the pool they would need
   // ~10 connections at once, which exhausts a pooler limited to 15 clients (Supabase session mode) and breaks the other pages.
-  return db.transaction((c) => buildOverview((sql, vals) => db.query(sql, vals, c), range, filters));
+  // One connection can only run one query at a time (sending several at once is deprecated in pg), so they are queued.
+  return db.transaction((c) => {
+    let tail: Promise<unknown> = Promise.resolve();
+    const q: Q = (sql, vals) => {
+      const run = tail.then(() => db.query(sql, vals, c));
+      tail = run.catch(() => undefined);
+      return run as ReturnType<Q>;
+    };
+    return buildOverview(q, range, filters);
+  });
 }
 
 async function buildOverview(q: Q, range: ReportRange, flt: ReportFilters): Promise<Overview> {
