@@ -758,6 +758,7 @@ export async function reviseInvoice(id: string, newTotal: string, reason: string
     await assertWithinSale(tx, cur.sale_id, id, plan.items, plan.lines);
 
     await tx.query("SELECT set_config('app.invoice_amend', 'on', true)"); // lets the guard triggers allow this one change
+    let document: DocumentSnapshot;
     try {
       for (const [idx, it] of plan.inv.items.entries()) {
         const l = plan.lines[idx]!;
@@ -772,24 +773,31 @@ export async function reviseInvoice(id: string, newTotal: string, reason: string
         [t.subtotal, t.cgst, t.sgst, t.igst, t.tax, t.roundOff, t.total, id],
       );
       await tx.query("UPDATE sale_milestones SET basis='amount', amount=$1, percent=NULL, updated_at=now() WHERE invoice_id=$2", [t.subtotal, id]);
-      const document = await buildDocumentSnapshot(id, cur.sale_id, t.subtotal, tx, plan.inv.issued_at);
+      document = await buildDocumentSnapshot(id, cur.sale_id, t.subtotal, tx, plan.inv.issued_at);
       await tx.query("UPDATE invoices SET document_snapshot=$1 WHERE id=$2", [JSON.stringify(document), id]);
-
-      const last = (await tx.query<{ version_no: number; client_snapshot: ClientSnapshot; company_snapshot: CompanySnapshot; item_codes: Record<string, string | null> | null; item_descriptions: Record<string, string> | null }>(
-        "SELECT version_no, client_snapshot, company_snapshot, item_codes, item_descriptions FROM invoice_versions WHERE invoice_id = $1 ORDER BY version_no DESC LIMIT 1", [id])).rows[0]!;
-      const version = last.version_no + 1;
-      const note = `Amount revised from ${plan.inv.total} to ${t.total}. ${why}`;
-      await storeVersion(tx, await loadInvoice(id, tx), version, { client: last.client_snapshot, company: last.company_snapshot, document },
-        { reason: note, actorId, itemCodes: last.item_codes, itemDescriptions: last.item_descriptions });
-      await logActivity({
-        entityType: "invoice", entityId: id, clientId: cur.client_id, action: "revised",
-        summary: `Invoice ${cur.invoice_number} revised (version ${version}): total ${plan.inv.total} to ${t.total}. ${why}`, actorId,
-        metadata: { version, from: plan.inv.total, to: t.total, fromSubtotal: plan.inv.subtotal, toSubtotal: t.subtotal },
-      }, tx);
-      return version;
-    } finally {
-      await tx.query("SELECT set_config('app.invoice_amend', 'off', true)");
+    } catch (e) {
+      // A database that has not had `npm run db:sync` since this feature still locks the lines and totals. Do not run anything
+      // else here: the transaction is already aborted and a further query would hide this reason behind a generic error.
+      if ((e as { code?: string }).code === "23514") {
+        throw new AppError("The database has not been updated for revising invoices yet. Run `npm run db:sync`, then try again.", 409, "DATABASE_OUT_OF_DATE");
+      }
+      throw e;
     }
+    await tx.query("SELECT set_config('app.invoice_amend', 'off', true)");
+
+    const t = plan.totals;
+    const last = (await tx.query<{ version_no: number; client_snapshot: ClientSnapshot; company_snapshot: CompanySnapshot; item_codes: Record<string, string | null> | null; item_descriptions: Record<string, string> | null }>(
+      "SELECT version_no, client_snapshot, company_snapshot, item_codes, item_descriptions FROM invoice_versions WHERE invoice_id = $1 ORDER BY version_no DESC LIMIT 1", [id])).rows[0]!;
+    const version = last.version_no + 1;
+    const note = `Amount revised from ${plan.inv.total} to ${t.total}. ${why}`;
+    await storeVersion(tx, await loadInvoice(id, tx), version, { client: last.client_snapshot, company: last.company_snapshot, document },
+      { reason: note, actorId, itemCodes: last.item_codes, itemDescriptions: last.item_descriptions });
+    await logActivity({
+      entityType: "invoice", entityId: id, clientId: cur.client_id, action: "revised",
+      summary: `Invoice ${cur.invoice_number} revised (version ${version}): total ${plan.inv.total} to ${t.total}. ${why}`, actorId,
+      metadata: { version, from: plan.inv.total, to: t.total, fromSubtotal: plan.inv.subtotal, toSubtotal: t.subtotal },
+    }, tx);
+    return version;
   });
 }
 

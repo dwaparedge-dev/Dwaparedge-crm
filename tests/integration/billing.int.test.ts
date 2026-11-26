@@ -256,6 +256,31 @@ describe("revising an issued invoice", () => {
     expect((await getInvoice(a.id)).versions.map((v) => v.version_no)).toEqual([3, 2, 1]);
   });
 
+  it("says the database needs updating (instead of failing blindly) when the guard is the old one, and changes nothing", async () => {
+    const { reviseInvoice, getInvoice } = await import("@/features/invoices/service");
+    const { errorResponse } = await import("@/lib/http");
+    const { db } = await import("@/lib/db");
+    const { readFile } = await import("node:fs/promises");
+    const a = await issued3();
+    // The guard as it was before revising existed: an issued invoice's lines cannot be updated at all.
+    await db.query(`CREATE OR REPLACE FUNCTION guard_invoice_items() RETURNS trigger AS $$
+      DECLARE parent_status TEXT;
+      BEGIN
+        SELECT status INTO parent_status FROM invoices WHERE id = COALESCE(NEW.invoice_id, OLD.invoice_id);
+        IF parent_status IS NOT NULL AND parent_status <> 'draft' THEN RAISE EXCEPTION 'Items of an issued invoice cannot be changed' USING ERRCODE = 'check_violation'; END IF;
+        RETURN COALESCE(NEW, OLD);
+      END $$ LANGUAGE plpgsql`);
+    try {
+      const failure = await reviseInvoice(a.id, "3000", "x", actor).then(() => null, (e) => e);
+      expect(failure).toMatchObject({ status: 409, code: "DATABASE_OUT_OF_DATE" });
+      expect(failure.message).toMatch(/npm run db:sync/);
+      expect((await errorResponse(failure).json()).error.message).toMatch(/db:sync/);
+    } finally {
+      await db.query(await readFile("db/logic/billing_guards.sql", "utf8")); // back to the current guard for the other tests
+    }
+    expect(await getInvoice(a.id)).toMatchObject({ total: "3540.00", version: 1 });
+  });
+
   it("previews the new amounts without changing anything", async () => {
     const { previewRevise, getInvoice } = await import("@/features/invoices/service");
     const a = await issued3();
