@@ -9,7 +9,7 @@ import { computeInvoiceLine, summarizeInvoice, supplyType, type InvoiceLineAmoun
 import { todayIST } from "@/lib/dates";
 import { ensureClientCode, nextSequence } from "@/lib/sequences";
 import { invoiceNumber, invoiceNumberMatchesDate, monthScope } from "@/lib/numbering";
-import { buildBillingStatement, lineDescriptionFromSale, planShares, type BillMode, type DocumentSnapshot } from "@/lib/billing";
+import { buildBillingStatement, lineDescriptionFromSale, planShares, reviseToTotal, type BillMode, type DocumentSnapshot } from "@/lib/billing";
 import { formatScaled, parseScaled } from "@/lib/money";
 import { likePattern } from "@/lib/validation";
 import { stateNameByCode } from "@/lib/india";
@@ -699,6 +699,116 @@ export async function regenerateInvoice(id: string, reason: string | null, actor
       metadata: { version, changes: notes, ...(currentNumber !== cur.invoice_number ? { previousNumber: cur.invoice_number } : {}) },
     }, tx);
     return version;
+  });
+}
+
+const reviseFail = (message: string) => new AppError(message, 422, "VALIDATION_ERROR");
+
+/** A total is money with at most two decimals, greater than zero. */
+function parseReviseTotal(newTotal: string) {
+  const total = String(newTotal).trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(total) || parseScaled(total, 2) <= 0n) throw reviseFail("Enter a total greater than 0, with at most two decimals");
+  return total;
+}
+
+/**
+ * What an issued invoice would look like at `newTotal` (incl. GST): the same lines with new amounts, priced exactly like issuing
+ * prices them. Refuses a total no taxable value can reach, and one below what is already paid on the invoice.
+ */
+async function planRevision(id: string, newTotal: string, runner?: PoolClient) {
+  const inv = await loadInvoice(id, runner);
+  if (inv.status !== "issued") throw new AppError(`Only an issued invoice can be revised (this one is ${inv.status})`, 409, "INVALID_TRANSITION");
+  if (!inv.supply_type) throw new AppError("This invoice has no GST supply type, so it cannot be revised", 409, "INVALID_TRANSITION");
+  const allocated = (await db.queryOne<{ paid: string }>("SELECT COALESCE(sum(amount), 0)::numeric(14,2) AS paid FROM payment_allocations WHERE invoice_id = $1 AND reversed_at IS NULL", [id], runner))!.paid;
+  if (parseScaled(newTotal, 2) < parseScaled(allocated, 2)) {
+    throw new AppError(`${allocated} is already paid on this invoice, so its total cannot be lowered below that. Reverse a payment allocation first if the client paid too much.`, 409, "BELOW_PAID");
+  }
+  const settings = await getSettings(runner);
+  let solved;
+  try {
+    solved = reviseToTotal(inv.items.map((i) => ({ id: i.id, taxable: i.taxable_amount, taxRate: i.tax_rate })), newTotal, inv.supply_type, settings.round_off_total);
+  } catch (e) {
+    throw new AppError((e as Error).message, 422, "REVISE_UNREACHABLE");
+  }
+  const shareById = new Map(solved.shares.map((x) => [x.id, x.taxable]));
+  const items: InvoiceInput["items"] = inv.items.map((i) => ({
+    saleItemId: i.sale_item_id, productId: i.product_id, description: i.description, hsnSac: i.hsn_sac, quantity: "1",
+    unitPrice: shareById.get(i.id)!, discountPercent: "0", taxRate: i.tax_rate,
+  }));
+  const { lines, totals } = price(items, inv.supply_type, settings.round_off_total);
+  if (parseScaled(totals.total, 2) !== parseScaled(newTotal, 2)) throw new AppError(`The invoice would total ${totals.total}, not ${newTotal}`, 422, "REVISE_UNREACHABLE");
+  return { inv, items, lines, totals, allocated };
+}
+
+/**
+ * Changes the total of an issued invoice, keeping its number, date and parties. Every line keeps its identity and gets a new
+ * amount; the document as it stood is kept as an earlier version (its PDF, and the old amounts in the activity log), and the
+ * instalment that this invoice bills follows the new amount. Payments already applied stay as they are but may not exceed the
+ * new total. Returns the new version number.
+ */
+export async function reviseInvoice(id: string, newTotal: string, reason: string, actorId: string) {
+  const total = parseReviseTotal(newTotal);
+  const why = reason.trim();
+  if (!why || why.length > 500) throw reviseFail("Give a reason of up to 500 characters");
+  return db.transaction(async (tx) => {
+    const cur = await lockInvoice(tx, id);
+    if (cur.status !== "issued") throw new AppError(`Only an issued invoice can be revised (this one is ${cur.status})`, 409, "INVALID_TRANSITION");
+    await ensureOriginalVersion(tx, id, actorId); // version 1 = the invoice as the client received it
+    const plan = await planRevision(id, total, tx);
+    await assertWithinSale(tx, cur.sale_id, id, plan.items, plan.lines);
+
+    await tx.query("SELECT set_config('app.invoice_amend', 'on', true)"); // lets the guard triggers allow this one change
+    try {
+      for (const [idx, it] of plan.inv.items.entries()) {
+        const l = plan.lines[idx]!;
+        await tx.query(
+          `UPDATE invoice_items SET quantity=$1, unit_price=$2, discount_percent=$3, taxable_amount=$4, cgst_amount=$5, sgst_amount=$6, igst_amount=$7, tax_amount=$8, line_total=$9 WHERE id=$10`,
+          [plan.items[idx]!.quantity, plan.items[idx]!.unitPrice, plan.items[idx]!.discountPercent, l.taxable, l.cgst, l.sgst, l.igst, l.tax, l.total, it.id],
+        );
+      }
+      const t = plan.totals;
+      await tx.query(
+        "UPDATE invoices SET subtotal=$1, cgst_total=$2, sgst_total=$3, igst_total=$4, tax_total=$5, round_off=$6, total=$7, updated_at=now() WHERE id=$8",
+        [t.subtotal, t.cgst, t.sgst, t.igst, t.tax, t.roundOff, t.total, id],
+      );
+      await tx.query("UPDATE sale_milestones SET basis='amount', amount=$1, percent=NULL, updated_at=now() WHERE invoice_id=$2", [t.subtotal, id]);
+      const document = await buildDocumentSnapshot(id, cur.sale_id, t.subtotal, tx, plan.inv.issued_at);
+      await tx.query("UPDATE invoices SET document_snapshot=$1 WHERE id=$2", [JSON.stringify(document), id]);
+
+      const last = (await tx.query<{ version_no: number; client_snapshot: ClientSnapshot; company_snapshot: CompanySnapshot; item_codes: Record<string, string | null> | null; item_descriptions: Record<string, string> | null }>(
+        "SELECT version_no, client_snapshot, company_snapshot, item_codes, item_descriptions FROM invoice_versions WHERE invoice_id = $1 ORDER BY version_no DESC LIMIT 1", [id])).rows[0]!;
+      const version = last.version_no + 1;
+      const note = `Amount revised from ${plan.inv.total} to ${t.total}. ${why}`;
+      await storeVersion(tx, await loadInvoice(id, tx), version, { client: last.client_snapshot, company: last.company_snapshot, document },
+        { reason: note, actorId, itemCodes: last.item_codes, itemDescriptions: last.item_descriptions });
+      await logActivity({
+        entityType: "invoice", entityId: id, clientId: cur.client_id, action: "revised",
+        summary: `Invoice ${cur.invoice_number} revised (version ${version}): total ${plan.inv.total} to ${t.total}. ${why}`, actorId,
+        metadata: { version, from: plan.inv.total, to: t.total, fromSubtotal: plan.inv.subtotal, toSubtotal: t.subtotal },
+      }, tx);
+      return version;
+    } finally {
+      await tx.query("SELECT set_config('app.invoice_amend', 'off', true)");
+    }
+  });
+}
+
+/** What revising to `newTotal` would do, without changing anything. A reason it cannot be done comes back in `blocked`. */
+export async function previewRevise(id: string, newTotal: string) {
+  const total = parseReviseTotal(newTotal);
+  return db.transaction(async (tx) => {
+    const inv = await loadInvoice(id, tx);
+    try {
+      const plan = await planRevision(id, total, tx);
+      await assertWithinSale(tx, inv.sale_id, id, plan.items, plan.lines);
+      return { currentTotal: inv.total, newSubtotal: plan.totals.subtotal, newTax: plan.totals.tax, newRoundOff: plan.totals.roundOff, newTotal: plan.totals.total, allocated: plan.allocated, blocked: null as string | null };
+    } catch (e) {
+      if (e instanceof AppError && ["BELOW_PAID", "REVISE_UNREACHABLE", "OVER_BILLED"].includes(e.code ?? "")) {
+        const allocated = (await tx.query<{ paid: string }>("SELECT COALESCE(sum(amount), 0)::numeric(14,2) AS paid FROM payment_allocations WHERE invoice_id = $1 AND reversed_at IS NULL", [id])).rows[0]!.paid;
+        return { currentTotal: inv.total, newSubtotal: inv.subtotal, newTax: inv.tax_total, newRoundOff: inv.round_off, newTotal: inv.total, allocated, blocked: e.message };
+      }
+      throw e;
+    }
   });
 }
 

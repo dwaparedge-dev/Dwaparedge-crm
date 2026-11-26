@@ -164,6 +164,106 @@ describe("amend flag", () => {
   });
 });
 
+describe("revising an issued invoice", () => {
+  /** An issued invoice for a sale of 3 x 1000 at 18% (taxable 3000.00, total 3540.00). */
+  async function issued3() {
+    const { issueInvoice } = await import("@/features/invoices/service");
+    const saleId = await confirmedSale(actor, intra, [LINE("1000", "18", "3")]);
+    const id = await bill(actor, saleId);
+    await patchDraft(actor, id, { issueDate: "2026-10-05", dueDate: "2026-10-20" });
+    const number = await issueInvoice(id, actor);
+    return { id, number, saleId };
+  }
+  async function pay(invoiceId: string, amount: string) {
+    const { recordPayment } = await import("@/features/payments/service");
+    const { paymentInputSchema } = await import("@/features/payments/schema");
+    return recordPayment(paymentInputSchema.parse({ clientId: intra, paymentDate: "2026-10-06", amount, method: "upi", allocations: [{ invoiceId, amount }] }), actor);
+  }
+
+  it("changes the total but keeps the number and date, keeps the original as version 1 and logs the change", async () => {
+    const { getInvoice, getStoredInvoicePdf, reviseInvoice } = await import("@/features/invoices/service");
+    const { db } = await import("@/lib/db");
+    const { id, number, saleId } = await issued3();
+    expect(await reviseInvoice(id, "3000", "Client agreed 3000 all-in", actor)).toBe(2);
+    const inv = await getInvoice(id);
+    expect(inv).toMatchObject({ invoice_number: number, issue_date: "2026-10-05", status: "issued", total: "3000.00", version: 2 });
+    expect(Number(inv.subtotal) + Number(inv.tax_total) + Number(inv.round_off)).toBeCloseTo(3000, 2);
+    expect(inv.versions.map((v) => v.version_no)).toEqual([2, 1]);
+    expect(inv.versions[0]!.reason).toMatch(/3540\.00 to 3000\.00.*Client agreed 3000 all-in/);
+    expect((await getStoredInvoicePdf(id, 1))?.pdf.length).toBeGreaterThan(1000);
+    expect((await getStoredInvoicePdf(id, 2))?.pdf.length).toBeGreaterThan(1000);
+    const log = await db.queryOne<{ metadata: { from: string; to: string; version: number } }>("SELECT metadata FROM activity_log WHERE entity_id = $1 AND action = 'revised'", [id]);
+    expect(log?.metadata).toMatchObject({ from: "3540.00", to: "3000.00", version: 2 });
+    const billing = await db.queryOne<{ issued_taxable: string }>("SELECT issued_taxable FROM sale_billing WHERE sale_id = $1", [saleId]);
+    expect(billing?.issued_taxable).toBe(inv.subtotal);
+  });
+
+  it("keeps the instalment in step with the invoice that bills it", async () => {
+    const { createDraftForSale, issueInvoice, reviseInvoice, getInvoice } = await import("@/features/invoices/service");
+    const { replaceMilestones } = await import("@/features/sales/service");
+    const { milestoneInputSchema, billSaleSchema } = await import("@/features/sales/schema");
+    const { db } = await import("@/lib/db");
+    const saleId = await confirmedSale(actor, intra, [LINE("1000", "18", "3")]);
+    await replaceMilestones(saleId, [milestoneInputSchema.parse({ title: "First", basis: "percent", percent: "53" }), milestoneInputSchema.parse({ title: "Second", basis: "percent", percent: "40" })], actor);
+    const ms = await db.query<{ id: string; position: number }>("SELECT id, position FROM sale_milestones WHERE sale_id = $1 ORDER BY position", [saleId]);
+    const id = await createDraftForSale(saleId, billSaleSchema.parse({ mode: "milestone", milestoneId: ms[0]!.id }), actor);
+    await issueInvoice(id, actor);
+    await reviseInvoice(id, "1500", "Rounded to what was agreed", actor);
+    const first = await db.queryOne<{ basis: string; amount: string; percent: string | null; invoice_id: string }>("SELECT basis, amount, percent, invoice_id FROM sale_milestones WHERE id = $1", [ms[0]!.id]);
+    expect(first).toMatchObject({ basis: "amount", percent: null, invoice_id: id, amount: (await getInvoice(id)).subtotal });
+    const second = await db.queryOne<{ basis: string; percent: string }>("SELECT basis, percent FROM sale_milestones WHERE id = $1", [ms[1]!.id]);
+    expect(second).toMatchObject({ basis: "percent", percent: "40.00" });
+  });
+
+  it("allows a revise that stays at or above what is already paid, and blocks one below it", async () => {
+    const { reviseInvoice, getInvoice, previewRevise } = await import("@/features/invoices/service");
+    const a = await issued3();
+    await pay(a.id, "3540");
+    await expectAppError(reviseInvoice(a.id, "3000", "too low", actor), 409, "BELOW_PAID");
+    expect((await previewRevise(a.id, "3000")).blocked).toMatch(/already paid/i);
+    expect((await getInvoice(a.id)).total).toBe("3540.00");
+    const b = await issued3();
+    await pay(b.id, "3000");
+    await reviseInvoice(b.id, "3200", "ok", actor);
+    expect(await getInvoice(b.id)).toMatchObject({ total: "3200.00", balance_due: "200.00" });
+    await reviseInvoice(b.id, "3000", "equal to paid", actor);
+    expect(await getInvoice(b.id)).toMatchObject({ total: "3000.00", balance_due: "0.00" });
+  });
+
+  it("will not bill more than the sale has left, and only revises issued invoices", async () => {
+    const { reviseInvoice, cancelInvoice } = await import("@/features/invoices/service");
+    const a = await issued3();
+    await expectAppError(reviseInvoice(a.id, "5000", "too much", actor), 422, "OVER_BILLED");
+    const draftId = await bill(actor, await confirmedSale(actor, intra));
+    await expectAppError(reviseInvoice(draftId, "500", "x", actor), 409, "INVALID_TRANSITION");
+    await cancelInvoice(a.id, "mistake", actor);
+    await expectAppError(reviseInvoice(a.id, "500", "x", actor), 409, "INVALID_TRANSITION");
+  });
+
+  it("rejects a zero, negative or three-decimal total and a missing reason, changing nothing", async () => {
+    const { reviseInvoice, getInvoice } = await import("@/features/invoices/service");
+    const a = await issued3();
+    for (const bad of ["0", "-5", "10.005", "abc"]) await expectAppError(reviseInvoice(a.id, bad, "x", actor), 422, "VALIDATION_ERROR");
+    await expectAppError(reviseInvoice(a.id, "3000", "   ", actor), 422, "VALIDATION_ERROR");
+    expect(await getInvoice(a.id)).toMatchObject({ total: "3540.00", version: 1 });
+  });
+
+  it("serialises two revises of the same invoice into versions 2 and 3", async () => {
+    const { reviseInvoice, getInvoice } = await import("@/features/invoices/service");
+    const a = await issued3();
+    const r = await Promise.allSettled([reviseInvoice(a.id, "3000", "first", actor), reviseInvoice(a.id, "2500", "second", actor)]);
+    expect(r.map((x) => x.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect((await getInvoice(a.id)).versions.map((v) => v.version_no)).toEqual([3, 2, 1]);
+  });
+
+  it("previews the new amounts without changing anything", async () => {
+    const { previewRevise, getInvoice } = await import("@/features/invoices/service");
+    const a = await issued3();
+    expect(await previewRevise(a.id, "3000")).toMatchObject({ currentTotal: "3540.00", newTotal: "3000.00", allocated: "0.00", blocked: null });
+    expect(await getInvoice(a.id)).toMatchObject({ total: "3540.00", version: 1 });
+  });
+});
+
 describe("sale to invoice", () => {
   it("copies the sale's items into a draft linked to the sale", async () => {
     const { getInvoice } = await import("@/features/invoices/service");
