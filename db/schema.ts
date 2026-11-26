@@ -18,7 +18,7 @@
  * and run `npm run db:migrate`.
  */
 
-export type SchemaModule = "core" | "crm" | "catalog" | "sales" | "billing" | "licensing" | "tasks";
+export type SchemaModule = "core" | "crm" | "catalog" | "sales" | "billing" | "licensing" | "tasks" | "analytics";
 
 export interface TableDefinition {
   /** Table name in PostgreSQL. */
@@ -48,6 +48,9 @@ export const TABLE_REGISTRY: TableDefinition[] = [
   t("crm", "client_documents", "Files uploaded against a client (GST certificate, agreements, ...)"),
   t("crm", "activity_log", "Shared activity / audit log"),
   t("crm", "demo_requests", "Demo requests submitted from the FactoOne landing page"),
+  t("analytics", "analytics_visitors", "Website visitors who accepted analytics (opt-in, pseudonymous)"),
+  t("analytics", "analytics_sessions", "Website visits: where, when, from where, on what device"),
+  t("analytics", "analytics_events", "Page views, time on page and named actions within a visit"),
   t("tasks", "task_categories", "Task categories (Collections, Sales & leads, ...), editable from Settings"),
   t("tasks", "task_priorities", "Task priorities (Critical, High, ...), editable from Settings"),
   t("tasks", "tasks", "Task Desk: things to do and chase, raised by hand or automatically"),

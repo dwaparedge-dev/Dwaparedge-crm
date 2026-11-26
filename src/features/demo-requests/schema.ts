@@ -26,6 +26,8 @@ export const demoRequestInputSchema = z.object({
   externalRef: z.string().trim().regex(/^[A-Za-z0-9_-]{8,100}$/, "Invalid reference").optional(),
   /** The visitor's address and browser, as seen by the FactoOne server (the CRM only sees that server). */
   submitterIp: optionalPlainText(64),
+  /** Browser id from website analytics. Sent only when the visitor accepted analytics, so staff can see what they looked at. */
+  visitorId: z.string().uuid().optional(),
   userAgent: optionalPlainText(300),
 });
 export type DemoRequestInput = z.infer<typeof demoRequestInputSchema>;

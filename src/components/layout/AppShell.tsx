@@ -35,9 +35,10 @@ import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import SettingsIcon from "@mui/icons-material/SettingsOutlined";
 import NotificationsIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import { IdleSignOut } from "./IdleSignOut";
+import AnalyticsIcon from "@mui/icons-material/InsightsOutlined";
 import LockIcon from "@mui/icons-material/LockOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { NAV_GROUPS, NAV_ITEMS, type NavItem } from "./nav";
+import { NAV_ITEMS, visibleNavGroups, type NavItem } from "./nav";
 import { useNotify } from "@/components/common/Notify";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PageSearch } from "./PageSearch";
@@ -50,6 +51,7 @@ const MINI = 71;
 
 const ICONS: Record<NavItem["icon"], React.ReactNode> = {
   dashboard: <DashboardIcon />,
+  analytics: <AnalyticsIcon />,
   tasks: <TasksIcon />,
   demoRequests: <DemoRequestsIcon />,
   clients: <ClientsIcon />,
@@ -118,7 +120,7 @@ export function AppShell({ user, children }: { user: CurrentUserValue; children:
       </Box>
       {mini && <Box sx={{ display: "flex", justifyContent: "center", pb: 1 }}><Tooltip title="Expand sidebar" placement="right"><IconButton size="small" aria-label="Expand sidebar" onClick={() => setCollapsed(false)}><ChevronRightIcon /></IconButton></Tooltip></Box>}
       <Box component="nav" aria-label="Main navigation" sx={{ px: 1.5, py: 1.5, flexGrow: 1, overflowY: "auto" }}>
-        {NAV_GROUPS.map((group, gi) => (
+        {visibleNavGroups(user.permissions).map((group, gi) => (
           <Box key={group.title} sx={{ mb: 1 }}>
             {mini ? (gi > 0 && <Divider sx={{ my: 1 }} />) : (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, pt: gi ? 1.5 : 0.5, pb: 0.75 }}>
@@ -191,7 +193,7 @@ export function AppShell({ user, children }: { user: CurrentUserValue; children:
             <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }} noWrap>DwaparEdge CRM</Typography>
           </Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 0.5, md: 1.5 } }}>
-            <Box sx={{ display: { xs: "none", sm: "block" } }}><PageSearch onNavigate={(href) => router.push(href)} /></Box>
+            <Box sx={{ display: { xs: "none", sm: "block" } }}><PageSearch permissions={user.permissions} onNavigate={(href) => router.push(href)} /></Box>
             <Tooltip title="Notifications">
               <IconButton aria-label={anythingWaiting ? `Notifications, ${bellTotal} waiting` : "Notifications"} onClick={(e) => setBellAnchor(e.currentTarget)}>
                 <Badge color="error" max={99} badgeContent={bellTotal}><NotificationsIcon /></Badge>

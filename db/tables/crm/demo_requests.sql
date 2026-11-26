@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS demo_requests (
   last_submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   contacted_at      TIMESTAMPTZ,
   ip_hash           TEXT,       -- salted hash of the visitor's address; never the address itself
+  visitor_id        UUID,       -- analytics_visitors.id of the browser, only when the visitor had accepted analytics; no foreign key so erasing analytics never blocks a lead
   user_agent        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -27,3 +28,4 @@ CREATE INDEX IF NOT EXISTS demo_requests_status_idx ON demo_requests (status, cr
 CREATE INDEX IF NOT EXISTS demo_requests_email_lower_idx ON demo_requests (lower(email));
 CREATE INDEX IF NOT EXISTS demo_requests_mobile_idx ON demo_requests (mobile);
 CREATE INDEX IF NOT EXISTS demo_requests_owner_idx ON demo_requests (owner_id);
+CREATE INDEX IF NOT EXISTS demo_requests_visitor_idx ON demo_requests (visitor_id) WHERE visitor_id IS NOT NULL;

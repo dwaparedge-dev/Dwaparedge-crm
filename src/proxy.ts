@@ -38,9 +38,12 @@ export async function proxy(request: NextRequest) {
     const ip = request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
     const isAuthRoute = pathname.startsWith("/api/auth/");
     const isIntakeRoute = pathname.startsWith("/api/intake/");
+    // Website analytics batches arrive from the same server address as demo requests but far more often. They get their own
+    // bucket so a busy day of page views can never use up the allowance a "Book a demo" submission needs.
+    const isAnalyticsIntake = pathname.startsWith("/api/intake/analytics/");
     // Every intake request arrives from the FactoOne server's address, so this bucket is a ceiling on all visitors
     // together, not per visitor (the FactoOne relay throttles per visitor before calling us).
-    const limited = isIntakeRoute ? overLimit(`intake:${ip}`, 60) : isAuthRoute ? overLimit(`auth:${ip}`, 30) : request.method === "GET" ? overLimit(`read:${ip}`, 300) : overLimit(`write:${ip}`, 90);
+    const limited = isAnalyticsIntake ? overLimit(`analytics:${ip}`, 1200) : isIntakeRoute ? overLimit(`intake:${ip}`, 60) : isAuthRoute ? overLimit(`auth:${ip}`, 30) : request.method === "GET" ? overLimit(`read:${ip}`, 300) : overLimit(`write:${ip}`, 90);
     if (limited) {
       return NextResponse.json({ error: { code: "RATE_LIMITED", message: "Too many requests. Slow down and try again in a minute." } }, { status: 429, headers: { "Retry-After": "60" } });
     }

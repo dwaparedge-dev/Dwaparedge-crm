@@ -16,7 +16,8 @@
     "invoices:refresh": "tsx --conditions=react-server scripts/refresh-invoice-descriptions.ts",
     "test:db": "vitest run --config vitest.integration.config.mts",
     "check": "npm run typecheck && npm run lint && npm test",
-    "tasks:backfill": "tsx --conditions=react-server scripts/tasks-backfill.ts"
+    "tasks:backfill": "tsx --conditions=react-server scripts/tasks-backfill.ts",
+    "analytics:purge": "tsx --conditions=react-server scripts/analytics-purge.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

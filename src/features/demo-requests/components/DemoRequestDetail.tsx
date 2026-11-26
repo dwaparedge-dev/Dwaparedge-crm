@@ -41,6 +41,8 @@ import type { DemoRequestEventRow, DemoRequestRow } from "../service";
 import { announceDemoRequestsChanged } from "../useNewDemoRequestCount";
 import { DeleteDemoRequestDialog } from "./DeleteDemoRequestDialog";
 import { STATUS_LABEL, describeSource, formatMobile } from "./common";
+import { WebsiteActivity } from "@/features/analytics/components/WebsiteActivity";
+import WebIcon from "@mui/icons-material/PublicOutlined";
 
 export type DemoRequestDetailData = DemoRequestRow & { events: DemoRequestEventRow[] };
 export interface StaffOption { id: string; name: string }
@@ -94,13 +96,16 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
   const [busy, setBusy] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const canDelete = hasPermission(useCurrentUser().permissions, "demo_requests.delete");
+  const { permissions } = useCurrentUser();
+  const canDelete = hasPermission(permissions, "demo_requests.delete");
+  const canSeeVisits = hasPermission(permissions, "analytics.view");
   const spam = r.status === "spam";
   const eventCount = r.events.length;
   const tabs = useMemo(() => [
     { key: "overview", label: "Overview", icon: <InfoIcon sx={{ fontSize: 18 }} /> },
     { key: "history", label: "Activity History", icon: <HistoryIcon sx={{ fontSize: 18 }} />, count: eventCount || undefined },
-  ], [eventCount]);
+    ...(canSeeVisits ? [{ key: "website", label: "Website activity", icon: <WebIcon sx={{ fontSize: 18 }} /> }] : []),
+  ], [eventCount, canSeeVisits]);
 
   async function setStatus(status: DemoRequestStatus) {
     setBusy(true);
@@ -204,6 +209,7 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
             </List>
           )}
         </DetailTabPanel>
+        {canSeeVisits && <DetailTabPanel value={tab} index={2}><WebsiteActivity requestId={r.id} /></DetailTabPanel>}
       </DetailViewTabs>
       {deleting && <DeleteDemoRequestDialog request={r} onClose={() => setDeleting(false)} onDeleted={onBack} />}
       {addingTask && (

@@ -4,12 +4,12 @@ import Autocomplete from "@mui/material/Autocomplete";
 import InputAdornment from "@mui/material/InputAdornment";
 import TextField from "@mui/material/TextField";
 import SearchIcon from "@mui/icons-material/SearchRounded";
-import { NAV_ITEMS } from "./nav";
+import { visibleNavGroups } from "./nav";
 
 /** Quick jump to any page of the app. (Searching records comes later.) */
-export function PageSearch({ onNavigate }: { onNavigate: (href: string) => void }) {
+export function PageSearch({ onNavigate, permissions }: { onNavigate: (href: string) => void; permissions: readonly string[] }) {
   const [input, setInput] = useState("");
-  const options = useMemo(() => NAV_ITEMS.filter((i) => i.ready), []);
+  const options = useMemo(() => visibleNavGroups(permissions).flatMap((g) => g.items).filter((i) => i.ready), [permissions]);
   return (
     <Autocomplete
       size="small"

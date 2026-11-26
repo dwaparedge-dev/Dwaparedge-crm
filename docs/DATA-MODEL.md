@@ -66,3 +66,19 @@ A follow-up time is never set when a task is created (only a cadence is copied f
 ## Auto-raised tasks
 
 Four rules raise tasks from records the CRM already holds: a demo request still `new` (Sales & leads, High, due today), an issued invoice past its due date with a balance (Collections, High), an active licence expiring within 30 days or already lapsed (Licences & renewals, Normal), and a confirmed sale's milestone due within 7 days or past with no live invoice while the sale still has something left to bill (Billing & invoicing, Normal). Owner is the demo request's or the client's owner, else Unassigned. Each has a `dedupe_key` (`demo_request:{id}`, `invoice_overdue:{id}`, `license_renewal:{id}:{expiry}`, `milestone:{id}`), unique across all statuses, so a task is raised once per condition. The sync (run by `POST /api/tasks/sync`) closes the task when the cause ends (`status = done`, `completed_by` empty = closed by the system) and reopens that same task if the cause returns; a task a person closed (Done or cancelled) is never reopened or recreated. Everything is off until `TASKS_AUTO_FROM` is set; only records dated on or after it get a task, older ones go through `npm run tasks:backfill`. Activity actions: `auto_created`, `auto_closed`, `auto_reopened`.
+
+## Website analytics (opt-in, pseudonymous)
+
+Three tables, written only for visitors who pressed Accept on the website. Deleting an `analytics_visitors` row erases that browser's visits and events (`ON DELETE CASCADE`).
+
+| Table | One row per | Holds |
+|---|---|---|
+| `analytics_visitors` | browser | random id, first / last seen, visit and page-view counts, first referrer host, `consent_version` + `consent_at` (proof of consent) |
+| `analytics_sessions` | visit | where (country / region / city), device type / browser / OS / language, source (referrer host, utm_*), entry and exit path, page count, active seconds, demo-requested flag |
+| `analytics_events` | page view, time-on-page report or named action | type, name, path (**never a query string**), duration, scroll %, time. No free-form payload |
+
+`demo_requests.visitor_id` links a lead to its browser (no foreign key, so erasing analytics never blocks a lead). It is set only when the visitor had accepted analytics, and is cleared when that data is erased or purged.
+
+**Never stored:** IP address, full User-Agent, query strings, form contents, keystrokes. **Retention:** `ANALYTICS_RETENTION_DAYS` (default 395); `npm run analytics:purge` erases older rows. **Erasure:** the website's "turn off" button calls `POST /api/intake/analytics/forget`; deleting a demo request also erases its linked browser's analytics.
+
+Reports read the `analytics_sessions` rows directly (indexed by start time); add a daily roll-up table if a period query ever becomes slow.

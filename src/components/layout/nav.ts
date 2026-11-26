@@ -1,8 +1,12 @@
+import type { Permission } from "@/lib/auth/permissions";
+
 export interface NavItem {
   label: string;
   href: string;
-  icon: "dashboard" | "tasks" | "demoRequests" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
+  icon: "dashboard" | "analytics" | "tasks" | "demoRequests" | "clients" | "products" | "sales" | "licenses" | "invoices" | "payments" | "settings";
   ready: boolean;
+  /** Hidden from people who do not hold this permission (the page and its API check it again). */
+  permission?: Permission;
 }
 
 export interface NavGroup {
@@ -41,9 +45,15 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "Insights", dot: "#72E128",
     items: [
+      { label: "Website Analytics", href: "/analytics", icon: "analytics", ready: true, permission: "analytics.view" },
       { label: "Settings", href: "/settings", icon: "settings", ready: true },
     ],
   },
 ];
 
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
+
+/** The pages this account may open: items needing a permission it lacks are dropped, and so are groups left empty. */
+export function visibleNavGroups(permissions: readonly string[]): NavGroup[] {
+  return NAV_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.permission || permissions.includes(i.permission)) })).filter((g) => g.items.length > 0);
+}

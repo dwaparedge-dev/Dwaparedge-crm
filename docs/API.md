@@ -110,3 +110,30 @@ Control characters are replaced by spaces and extra spaces collapsed. Unknown fi
 | 422 | Validation failed; `error.issues` names each field |
 | 429 | More than 60 intake calls a minute from one address (that address is the FactoOne server, so this caps all visitors together) |
 | 503 | `DEMO_INTAKE_KEY` is not set: the endpoint is off |
+
+## Website analytics
+
+### Intake (server to server, same `X-Intake-Key` as demo requests)
+The browser never calls these. The website's own `/api/collect` and `/api/collect/forget` routes (in the Dwapar_Edge repo) check the batch, add location and device labels, and forward it here.
+
+`POST /api/intake/analytics/events` — one batch for one visit, up to 20 events, body up to 16,000 characters.
+
+| Field | Meaning |
+|---|---|
+| `visitorId`, `sessionId` | UUIDs the browser made up. A session id already used by a different visitor answers `409 SESSION_MISMATCH` |
+| `consentVersion` | Version of the privacy notice the visitor accepted (kept as proof of consent) |
+| `country` (2 letters), `region`, `city` | Where the visit came from, looked up by the web host from the address, which is not sent |
+| `deviceType` (`desktop`/`mobile`/`tablet`), `browser`, `os`, `language` | Coarse labels only; no User-Agent string is stored |
+| `referrerHost`, `utmSource`, `utmMedium`, `utmCampaign` | Where the visit came from (host only; tags lower-cased) |
+| `events[]` | `eventId` (UUID, makes a retry harmless), `type` (`pageview` / `engagement` / `custom`), `path` (starts with `/`, **no query string or fragment: refused**), `name` (custom only, `a-z0-9_`), `durationS`, `scrollPct`, `ageMs` (how long before the send it happened; the server clock sets the time) |
+
+Answers: `202 {stored}` (0 when everything was a retry), `401` bad key, `409`, `413/415/400`, `422`, `429` (more than 1,200 a minute from one address; its own bucket so page views can never starve demo requests), `503` key not set.
+
+`POST /api/intake/analytics/forget` `{visitorId}` — erases the visitor, their visits and events, and unlinks any demo request. Answers `200 {removed: boolean}`.
+
+### Staff (need a session and the `analytics.view` permission; otherwise `403 FORBIDDEN`)
+| Route | Returns |
+|---|---|
+| `GET /api/analytics/overview?range=today\|7d\|30d\|90d` or `?from=YYYY-MM-DD&to=YYYY-MM-DD`, optional `&country=IN&device=mobile` | KPIs with the previous period, daily series plus the previous period's visitors per day, top and entry pages, sections reached, channels, referrers, campaigns, countries / regions / cities, devices, browsers, OS, day-by-hour heatmap, funnel, visitors on the site now, `health` (`lastEventAt`, `events24h`: a silent tracker shows here first), `options.countries` (for the filter list) and `generatedAt`. `country` (2 letters) and `device` (`desktop`/`mobile`/`tablet`) narrow every figure; with a filter on, `demoRequests` counts visits that ended in a request, because leads carry no location. Days are India (IST) calendar days; at most 366. A bad range answers `422`. All queries run on one database connection |
+| `GET /api/analytics/sessions?...&page=&pageSize=&only=identified\|converted` (same `country` / `device` filters; page size defaults to 10) | Individual visits, newest first |
+| `GET /api/demo-requests/{id}/journey` | What the browser behind a demo request did on the site: `{linked, visitor, sessions[] with events[]}`. `linked: false` (not an error) when the visitor had not accepted analytics |

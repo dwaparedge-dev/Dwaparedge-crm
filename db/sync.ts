@@ -44,6 +44,7 @@ async function addMissingColumns(client: pg.PoolClient | pg.Client, table: strin
   const { rows } = await client.query<{ column_name: string }>(
     "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1", [table],
   );
+  if (rows.length === 0) return []; // the table does not exist yet: the file's CREATE TABLE makes every column
   const have = new Set(rows.map((r) => r.column_name.toLowerCase()));
   const added: string[] = [];
   for (const c of parseColumns(sql)) {
@@ -68,8 +69,9 @@ export async function syncSchema(client: pg.PoolClient | pg.Client, options: Syn
     const sql = await readFile(join(DB_DIR, "tables", table.file), "utf8");
     await client.query("BEGIN");
     try {
-      await client.query(sql);
+      // Columns first: the file may also create an index on a column an older copy of the table does not have yet.
       const added = await addMissingColumns(client, table.name, sql);
+      await client.query(sql);
       await client.query("COMMIT");
       if (added.length) result.columnsAdded[table.name] = added;
       result.tablesSynced.push(table.name);

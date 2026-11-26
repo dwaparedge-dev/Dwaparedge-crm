@@ -33,14 +33,14 @@ export async function createDemoRequest(input: DemoRequestInput): Promise<Create
 
     // 2. The same person asking again within a day: bump the counter on their first request so staff see it once.
     const { rows: again } = await tx.query<{ id: string }>(
-      `UPDATE demo_requests SET repeat_count = repeat_count + 1, last_submitted_at = now(), updated_at = now()
+      `UPDATE demo_requests SET repeat_count = repeat_count + 1, last_submitted_at = now(), updated_at = now(), visitor_id = COALESCE(visitor_id, $4::uuid)
        WHERE id = (
          SELECT id FROM demo_requests
          WHERE status <> 'spam' AND created_at > now() - make_interval(hours => $3) AND (lower(email) = $1 OR mobile = $2)
          ORDER BY created_at DESC LIMIT 1
          FOR UPDATE)
        RETURNING id`,
-      [input.email, input.mobile, REPEAT_WINDOW_HOURS],
+      [input.email, input.mobile, REPEAT_WINDOW_HOURS, input.visitorId ?? null],
     );
     if (again[0]) {
       await logActivity(
@@ -52,13 +52,13 @@ export async function createDemoRequest(input: DemoRequestInput): Promise<Create
 
     // 3. A new request. A concurrent retry with the same external_ref loses the insert and is answered with the winner.
     const { rows } = await tx.query<{ id: string }>(
-      `INSERT INTO demo_requests (name, company, mobile, email, source, entry_point, external_ref, ip_hash, user_agent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO demo_requests (name, company, mobile, email, source, entry_point, external_ref, ip_hash, user_agent, visitor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (external_ref) WHERE external_ref IS NOT NULL DO NOTHING
        RETURNING id`,
       [
         input.name, input.company, input.mobile, input.email, input.source, input.entryPoint ?? null, input.externalRef ?? null,
-        input.submitterIp ? hashIp(input.submitterIp) : null, input.userAgent ?? null,
+        input.submitterIp ? hashIp(input.submitterIp) : null, input.userAgent ?? null, input.visitorId ?? null,
       ],
     );
     if (!rows[0]) {
@@ -217,8 +217,8 @@ export async function updateDemoRequest(id: string, input: UpdateDemoRequestInpu
 export async function deleteDemoRequest(id: string, actor: CurrentUser) {
   if (!hasPermission(actor.permissions, "demo_requests.delete")) throw new AppError("You do not have permission to delete demo requests", 403, "FORBIDDEN");
   await db.transaction(async (tx) => {
-    const { rows } = await tx.query<{ name: string; company: string; status: string }>(
-      "SELECT name, company, status FROM demo_requests WHERE id = $1 FOR UPDATE", [id]);
+    const { rows } = await tx.query<{ name: string; company: string; status: string; visitor_id: string | null }>(
+      "SELECT name, company, status, visitor_id FROM demo_requests WHERE id = $1 FOR UPDATE", [id]);
     const cur = rows[0];
     if (!cur) throw new AppError("Demo request not found", 404, "NOT_FOUND");
 
@@ -231,6 +231,11 @@ export async function deleteDemoRequest(id: string, actor: CurrentUser) {
     }
 
     await tx.query("DELETE FROM demo_requests WHERE id = $1", [id]);
+    // Deleting a person's request also erases what the website recorded about their browser (erasure must not leave a trail).
+    if (cur.visitor_id) {
+      await tx.query("DELETE FROM analytics_visitors WHERE id = $1", [cur.visitor_id]);
+      await tx.query("UPDATE demo_requests SET visitor_id = NULL WHERE visitor_id = $1", [cur.visitor_id]);
+    }
     await logActivity({
       entityType: "demo_request", entityId: id, action: "deleted", actorId: actor.id,
       summary: `Demo request from ${cur.name} (${cur.company}) deleted permanently`,

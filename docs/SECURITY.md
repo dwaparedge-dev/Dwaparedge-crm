@@ -28,7 +28,8 @@ The Task Desk is the first module with per-user access, and it is built so that 
 | `tasks.edit_all` | Change, complete and add notes to **other people's** tasks. Includes `tasks.view_all` |
 | `tasks.assign` | Give a task to someone else, or take an unassigned one ("Take it") |
 | `tasks.manage_settings` | Add, rename, recolour, reorder, hide and delete task categories and priorities |
-| `demo_requests.delete` | Delete a demo request permanently (the Delete button on the Demo requests list and detail page; `DELETE /api/demo-requests/{id}`) |
+| `demo_requests.delete` | Delete a demo request permanently (the Delete button on the Demo requests list and detail page; `DELETE /api/demo-requests/{id}`). Also erases the website analytics of the browser linked to it |
+| `analytics.view` | Open Website Analytics (`/analytics`, `/api/analytics/*`) and the Website activity tab of a demo request (`GET /api/demo-requests/{id}/journey`). Visitor data is personal data, so it has its own key; migration `0019` gave it to existing accounts, new accounts start without it |
 
 - **A new account holds none.** Accounts that existed when permissions were introduced were given all four (migration `0017_user_permissions`), because they already had full access; `db:seed-admin` gives the first admin all four.
 - **The command line is the only way to change them in v1** (there is no user screen yet): `npm run users -- permissions --email x`, `grant --email x --permission tasks.view_all`, `revoke ...`, and `create ... --grant a,b`. Run them from a machine that holds the database credential, like every other account command.
@@ -55,3 +56,22 @@ The Task Desk is the first module with per-user access, and it is built so that 
 - Apart from the Task Desk's four permissions (see [Per-user permissions](#per-user-permissions)), all staff have the same access and there are no roles. Only create accounts for people who may see and change everything, until the team-rollout phase brings permissions to the other pages.
 - The CSP allows inline scripts and styles (Next.js and the UI library need them); it still blocks every other origin.
 - There is no second sign-in step, so a leaked password is enough to sign in. Use long unique passwords and turn on two-step sign-in on the Supabase, Vercel and GitHub accounts themselves.
+
+## Website analytics and privacy law (India DPDP Act 2023, GDPR-style rules)
+
+How the design meets the main duties. This is engineering documentation, not legal advice: have a lawyer review the privacy notice (`Dwapar_Edge/src/app/privacy/page.tsx`) before relying on it.
+
+| Duty | What the system does |
+|---|---|
+| Free, specific, informed consent before processing | Opt-in. Until the visitor presses **Accept**, the tracker does not run and writes nothing to the browser. Accept and Decline are equally prominent. A browser Do Not Track or Global Privacy Control signal counts as Decline |
+| Notice | Plain-language banner and `/privacy` notice: what is collected, why, how long, who sees it, rights, contact. Linked from the banner, footer and the demo form |
+| Withdraw as easily as given | Footer **Privacy settings** link reopens the choice. Turning it off stops tracking at once, deletes the browser id and asks the server to erase past data; if the request fails it is retried on the next visit |
+| Proof of consent | `analytics_visitors.consent_version` / `consent_at`. Changing `CONSENT_VERSION` in the website re-asks everyone who accepted an older notice |
+| Data minimisation | No IP address (used in memory for rate-limiting and the location lookup only), no User-Agent string (reduced to browser / OS / device), paths without query strings, no form contents, no free-form event payload, no third-party scripts or cookies |
+| Purpose limitation | Used only for website statistics and, when a visitor books a demo, the lead's activity view. Not sold, shared or used for advertising |
+| Storage limitation | Erased after `ANALYTICS_RETENTION_DAYS` (default 395). **Schedule `npm run analytics:purge` daily** (cron on a machine holding the database credential, or a scheduled job) |
+| Erasure and correction | Self-service erasure on the website; deleting a demo request erases its browser's analytics too; `forgetVisitor()` in `src/features/analytics/service.ts` for a manual request by browser id |
+| Security safeguards | Server-to-server key (constant-time check), strict schema validation, size limits, own rate-limit bucket, staff access behind `analytics.view`, all queries parameterised, database closed to the public API |
+| Breach duty (DPDP) | Not automated. Keep the process: if analytics or lead data is exposed, notify the Data Protection Board and affected people as the Act requires |
+
+**Left for the business to decide:** name a grievance contact if the law requires one for your size; offer the notice in Gujarati and Hindi (DPDP lets people ask for any scheduled language); check where Supabase and the website host run their servers; record these processors in your data inventory; review whether a demo-request's retention period should be fixed.
