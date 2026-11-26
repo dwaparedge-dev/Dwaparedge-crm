@@ -95,10 +95,10 @@ export async function getOverview(range: ReportRange, filters: ReportFilters = {
   // One connection can only run one query at a time (sending several at once is deprecated in pg), so they are queued.
   return db.transaction((c) => {
     let tail: Promise<unknown> = Promise.resolve();
-    const q: Q = (sql, vals) => {
-      const run = tail.then(() => db.query(sql, vals, c));
+    const q: Q = <T extends QueryResultRow>(sql: string, vals?: unknown[]) => {
+      const run = tail.then(() => db.query<T>(sql, vals, c));
       tail = run.catch(() => undefined);
-      return run as ReturnType<Q>;
+      return run;
     };
     return buildOverview(q, range, filters);
   });
