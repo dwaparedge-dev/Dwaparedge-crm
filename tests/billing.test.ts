@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildBillingStatement, lineDescriptionFromSale, milestoneTaxable, planShares, type BillableItem } from "@/lib/billing";
+import { buildBillingStatement, lineDescriptionFromSale, milestoneTaxable, planShares, reviseToTotal, type BillableItem } from "@/lib/billing";
+import { computeInvoiceLine } from "@/lib/gst";
 import { formatScaled, parseScaled } from "@/lib/money";
 
 const item = (id: string, taxable: string, remaining = taxable): BillableItem => ({ id, taxable, remaining });
@@ -118,5 +119,34 @@ describe("lineDescriptionFromSale", () => {
   });
   it("does not mistake a bracket that belongs to the wording for an ending", () => {
     expect(lineDescriptionFromSale("Hosting (annual)", "Hosting (yearly)")).toBe("Hosting (yearly)");
+  });
+});
+
+describe("reviseToTotal", () => {
+  it("works back from a total incl. GST to the taxable value, to the paisa", () => {
+    const r = reviseToTotal([{ id: "a", taxable: "45000.00", taxRate: "18" }], "50000", "intra", false);
+    expect(r.shares).toEqual([{ id: "a", taxable: "42372.88" }]);
+    expect(r.totals.total).toBe("50000.00");
+    expect(r.totals.tax).toBe("7627.12");
+  });
+  it("reaches the total exactly across lines with different GST rates", () => {
+    const r = reviseToTotal([{ id: "a", taxable: "1000.00", taxRate: "0" }, { id: "b", taxable: "9000.00", taxRate: "18" }], "5000", "inter", true);
+    expect(r.totals.total).toBe("5000.00");
+    expect(sum(r.shares)).toBe(parseScaled(r.totals.subtotal, 2));
+  });
+  it("names the nearest reachable totals when no taxable value gives the target", () => {
+    // 12% intra without rounding: tax is two separately rounded halves, so some totals are skipped.
+    const reachable = new Set<string>();
+    for (let t = 1_000_000n; t <= 1_000_400n; t++) reachable.add(computeInvoiceLine({ quantity: 1, unitPrice: formatScaled(t, 2), discountPercent: 0, taxRate: 12 }, "intra").total);
+    let gap: string | null = null;
+    for (let v = 1_120_000n; v <= 1_120_400n && !gap; v++) if (!reachable.has(formatScaled(v, 2))) gap = formatScaled(v, 2);
+    expect(gap).not.toBeNull();
+    expect(() => reviseToTotal([{ id: "a", taxable: "10000.00", taxRate: "12" }], gap!, "intra", false)).toThrow(/nearest/i);
+  });
+  it("accepts any whole-rupee target when the total is rounded to the rupee", () => {
+    for (const target of ["1", "999", "12345", "50000"]) {
+      const r = reviseToTotal([{ id: "a", taxable: "100.00", taxRate: "12" }, { id: "b", taxable: "333.33", taxRate: "18" }], target, "intra", true);
+      expect(r.totals.total).toBe(`${target}.00`);
+    }
   });
 });

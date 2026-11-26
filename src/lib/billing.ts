@@ -1,3 +1,4 @@
+import { computeInvoiceLine, summarizeInvoice, type InvoiceTotals, type SupplyType } from "./gst";
 import { divRound, formatScaled, parseScaled } from "./money";
 
 /**
@@ -151,4 +152,56 @@ export function lineDescriptionFromSale(currentLine: string, saleDescription: st
     ? ` (${milestoneTitle})`
     : currentLine.match(/ \((?:Balance|Part payment|\d+(?:\.\d+)?%)\)$/)?.[0] ?? "";
   return `${saleDescription.trim()}${ending}`;
+}
+
+/**
+ * Works back from an invoice total (incl. GST) to the taxable value of each line, so revising an issued invoice lands
+ * on exactly the amount the client was asked to pay. The new taxable value is split over the lines in proportion to
+ * what they bill now, then priced with the same GST routine issuing uses. Throws when no taxable value gives the target.
+ */
+export function reviseToTotal(
+  lines: { id: string; taxable: string; taxRate: string }[], targetTotal: string, supply: SupplyType, roundToRupee: boolean,
+): { shares: { id: string; taxable: string }[]; totals: InvoiceTotals } {
+  const target = parseScaled(targetTotal, 2, "Total");
+  const weights = lines.map((l) => parseScaled(l.taxable, 2, "Line value"));
+  const weightSum = weights.reduce((a, b) => a + b, 0n);
+  if (target <= 0n) throw fail("The total must be greater than 0");
+  if (lines.length === 0 || weightSum <= 0n) throw fail("This invoice has no value to revise");
+
+  const split = (t: bigint) => {
+    const base = weights.map((w) => (t * w) / weightSum);
+    let left = t - base.reduce((a, b) => a + b, 0n);
+    const order = weights.map((w, i) => ({ i, frac: (t * w) % weightSum })).sort((a, b) => (b.frac > a.frac ? 1 : b.frac < a.frac ? -1 : a.i - b.i));
+    for (const { i } of order) {
+      if (left <= 0n) break;
+      base[i]! += 1n;
+      left -= 1n;
+    }
+    return base;
+  };
+  const priced = (t: bigint) => {
+    const shares = split(t);
+    const amounts = lines.map((l, i) => computeInvoiceLine({ quantity: "1", unitPrice: formatScaled(shares[i]!, 2), discountPercent: "0", taxRate: l.taxRate }, supply));
+    const totals = summarizeInvoice(amounts, roundToRupee);
+    return { shares, totals, total: parseScaled(totals.total, 2) };
+  };
+
+  // Smallest taxable value whose total reaches the target, then look around it: splitting the paise between lines can
+  // make the total step by a paisa or two either way, so the exact total is searched for in a small window.
+  let lo = 0n;
+  let hi = target;
+  while (lo < hi) {
+    const mid = (lo + hi) / 2n;
+    if (priced(mid).total >= target) hi = mid;
+    else lo = mid + 1n;
+  }
+  let below: bigint | null = null;
+  let above: bigint | null = null;
+  for (let t = lo > 50n ? lo - 50n : 0n; t <= lo + 50n; t++) {
+    const p = priced(t);
+    if (p.total === target) return { shares: lines.map((l, i) => ({ id: l.id, taxable: formatScaled(p.shares[i]!, 2) })), totals: p.totals };
+    if (p.total < target && (below === null || p.total > below)) below = p.total;
+    if (p.total > target && (above === null || p.total < above)) above = p.total;
+  }
+  throw fail(`No amount before GST gives exactly ${formatScaled(target, 2)} with this GST. The nearest totals are ${below === null ? "none below" : formatScaled(below, 2)} and ${above === null ? "none above" : formatScaled(above, 2)}.`);
 }
