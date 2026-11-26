@@ -37,6 +37,7 @@ import { RecordPaymentDialog } from "@/features/payments/components/RecordPaymen
 import type { InvoiceItemRow, InvoiceRow, InvoiceVersionRow } from "../service";
 import { InvoiceFormDialog } from "./InvoiceFormDialog";
 import { RegenerateInvoiceDialog } from "./RegenerateInvoiceDialog";
+import { ReviseInvoiceDialog } from "./ReviseInvoiceDialog";
 
 type Allocation = { id: string; payment_id: string; receipt_number: string; payment_date: string; method: string; amount: string; reversed_at: string | null };
 type Detail = InvoiceRow & { items: InvoiceItemRow[]; allocations: Allocation[]; version: number; versions: InvoiceVersionRow[] };
@@ -53,7 +54,7 @@ export function InvoiceDetail({ id }: { id: string }) {
   const notify = useNotify();
   const { data: inv, error, loading, reload } = useFetch<Detail>(`/api/invoices/${id}`);
   const sale = useFetch<{ advance: string; sale_number: string }>(inv ? `/api/sales/${inv.sale_id}` : null);
-  const [dialog, setDialog] = useState<"issue" | "cancel" | "delete" | "pay" | "regen" | null>(null);
+  const [dialog, setDialog] = useState<"issue" | "cancel" | "delete" | "pay" | "regen" | "revise" | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState(0);
@@ -159,6 +160,7 @@ export function InvoiceDetail({ id }: { id: string }) {
                 {isDraft && <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Edit draft</Button>}
                 {isDraft && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("delete")}>Delete draft</Button>}
                 {inv.status === "issued" && <Button fullWidth variant="outlined" startIcon={<RefreshIcon />} onClick={() => setDialog("regen")} disabled={live.length > 0}>Regenerate invoice</Button>}
+                {inv.status === "issued" && <Button fullWidth variant="outlined" startIcon={<EditIcon />} onClick={() => setDialog("revise")}>Revise amount</Button>}
                 {inv.status === "issued" && <Button fullWidth variant="outlined" color="error" onClick={() => setDialog("cancel")}>Cancel invoice</Button>}
               </HeroActions>
             }
@@ -292,6 +294,15 @@ export function InvoiceDetail({ id }: { id: string }) {
           dueDate={inv.due_date}
           onClose={() => setDialog(null)}
           onDone={(v) => { setDialog(null); notify.success(`Invoice regenerated (version ${v}). The earlier versions are kept under Versions.`); reload(); }}
+        />
+      )}
+      {dialog === "revise" && inv.invoice_number && (
+        <ReviseInvoiceDialog
+          invoiceId={id}
+          invoiceNumber={inv.invoice_number}
+          currentTotal={inv.total}
+          onClose={() => setDialog(null)}
+          onDone={(v) => { setDialog(null); notify.success(`Invoice revised (version ${v}). The earlier versions are kept under Versions.`); reload(); }}
         />
       )}
       {dialog === "pay" && (
