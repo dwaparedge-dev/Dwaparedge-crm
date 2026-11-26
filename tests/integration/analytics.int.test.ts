@@ -91,7 +91,7 @@ describe("report filters, comparison and health", () => {
     const range = resolveRange({ range: "today" });
 
     const de = await getOverview(range, { country: "DE" });
-    expect(de.filters).toEqual({ country: "DE", device: null });
+    expect(de.filters).toEqual({ country: "DE", device: null, region: null, city: null });
     expect(de.kpis.sessions).toBeGreaterThanOrEqual(1);
     expect(de.countries.map((c) => c.label)).toEqual(["DE"]);
     expect(de.options.countries).toEqual(expect.arrayContaining(["DE", "IN"])); // the dropdown still offers the other countries
