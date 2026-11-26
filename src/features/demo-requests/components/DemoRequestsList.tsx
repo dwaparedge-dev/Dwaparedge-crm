@@ -1,5 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import DeleteIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import Box from "@mui/material/Box";
@@ -16,8 +19,11 @@ import { ListLayout } from "@/components/common/ListLayout";
 import { StatCards } from "@/components/common/StatCards";
 import { SegmentedTabs } from "@/components/common/SegmentedTabs";
 import { useFetch } from "@/components/common/useFetch";
+import { useCurrentUser } from "@/components/layout/CurrentUserContext";
+import { hasPermission } from "@/lib/auth/permissions";
 import type { DemoRequestRow } from "../service";
 import type { DemoRequestStatus } from "../schema";
+import { DeleteDemoRequestDialog } from "./DeleteDemoRequestDialog";
 import { DemoRequestStatusChip, STATUS_LABEL, asStatus, describeSource, formatMobile } from "./common";
 
 interface Summary { new: number; contacted: number; scheduled: number; done: number; spam: number; all: number }
@@ -32,6 +38,8 @@ export function DemoRequestsList({ initialStatus = "" }: { initialStatus?: strin
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
+  const [deleting, setDeleting] = useState<DemoRequestRow | null>(null);
+  const canDelete = hasPermission(useCurrentUser().permissions, "demo_requests.delete");
 
   useEffect(() => {
     const t = setTimeout(() => { setDebounced(search.trim()); setPage(0); }, 300);
@@ -61,6 +69,14 @@ export function DemoRequestsList({ initialStatus = "" }: { initialStatus?: strin
     { field: "entry_point", headerName: "Came from", minWidth: 230, valueGetter: (_v, r) => describeSource(r.source, r.entry_point) },
     { field: "owner_name", headerName: "Owner", width: 150, valueFormatter: (v: string | null) => v ?? "Unassigned" },
     { field: "status", headerName: "Status", width: 130, renderCell: ({ row: r }) => <DemoRequestStatusChip status={r.status} /> },
+    ...(canDelete ? [{
+      field: "delete", headerName: "", width: 64, sortable: false, filterable: false, disableColumnMenu: true,
+      renderCell: ({ row: r }: { row: DemoRequestRow }) => (
+        <Tooltip title="Delete permanently">
+          <IconButton size="small" color="error" aria-label={`Delete the demo request from ${r.name}`} onClick={(e) => { e.stopPropagation(); setDeleting(r); }}><DeleteIcon fontSize="small" /></IconButton>
+        </Tooltip>
+      ),
+    } satisfies GridColDef<DemoRequestRow>] : []),
   ];
 
   const count = (key: keyof Summary) => data?.summary[key];
@@ -91,6 +107,7 @@ export function DemoRequestsList({ initialStatus = "" }: { initialStatus?: strin
           />
         )}
       </ListLayout>
+      {deleting && <DeleteDemoRequestDialog request={deleting} onClose={() => setDeleting(null)} onDeleted={() => { setDeleting(null); reload(); }} />}
     </>
   );
 }

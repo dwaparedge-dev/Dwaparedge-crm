@@ -19,6 +19,7 @@ import EmailIcon from "@mui/icons-material/EmailOutlined";
 import HistoryIcon from "@mui/icons-material/HistoryOutlined";
 import InfoIcon from "@mui/icons-material/InfoOutlined";
 import PhoneIcon from "@mui/icons-material/PhoneOutlined";
+import DeleteIcon from "@mui/icons-material/DeleteForeverOutlined";
 import TaskAltIcon from "@mui/icons-material/TaskAltOutlined";
 import WhatsAppIcon from "@mui/icons-material/WhatsApp";
 import { HeroActions } from "@/components/common/HeroActions";
@@ -31,11 +32,14 @@ import {
   type MasterStatusType,
 } from "@/components/shared/DetailView";
 import { api } from "@/lib/api-client";
+import { useCurrentUser } from "@/components/layout/CurrentUserContext";
+import { hasPermission } from "@/lib/auth/permissions";
 import { TaskFormDialog } from "@/features/tasks/components/TaskFormDialog";
 import { announceTasksChanged } from "@/features/tasks/useDeskCounts";
 import type { DemoRequestStatus } from "../schema";
 import type { DemoRequestEventRow, DemoRequestRow } from "../service";
 import { announceDemoRequestsChanged } from "../useNewDemoRequestCount";
+import { DeleteDemoRequestDialog } from "./DeleteDemoRequestDialog";
 import { STATUS_LABEL, describeSource, formatMobile } from "./common";
 
 export type DemoRequestDetailData = DemoRequestRow & { events: DemoRequestEventRow[] };
@@ -89,6 +93,8 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
   const [tab, setTab] = useState(0);
   const [busy, setBusy] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = hasPermission(useCurrentUser().permissions, "demo_requests.delete");
   const spam = r.status === "spam";
   const eventCount = r.events.length;
   const tabs = useMemo(() => [
@@ -140,6 +146,7 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
               {spam
                 ? <Button id="demo-not-spam" fullWidth variant="outlined" disabled={busy} onClick={() => setStatus("new")}>Not spam, reopen</Button>
                 : <Button id="demo-mark-spam" fullWidth variant="outlined" color="error" disabled={busy} onClick={() => setStatus("spam")}>Mark as spam</Button>}
+              {canDelete && <Button id="demo-delete" fullWidth variant="outlined" color="error" startIcon={<DeleteIcon />} disabled={busy} onClick={() => setDeleting(true)}>Delete permanently</Button>}
             </HeroActions>
           }
         />
@@ -198,6 +205,7 @@ export function DemoRequestPage({ request: r, staff, onBack, onChanged }: { requ
           )}
         </DetailTabPanel>
       </DetailViewTabs>
+      {deleting && <DeleteDemoRequestDialog request={r} onClose={() => setDeleting(false)} onDeleted={onBack} />}
       {addingTask && (
         <TaskFormDialog
           initial={{

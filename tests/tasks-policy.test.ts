@@ -174,9 +174,11 @@ describe("tasks.manage_settings", () => {
 });
 
 describe("every combination of the four permissions", () => {
+  // The four task keys only: demo_requests.delete has nothing to do with tasks.
+  const TASK_KEYS = PERMISSIONS.filter((p) => p.startsWith("tasks."));
   const combinations: Permission[][] = [];
-  for (let mask = 0; mask < 1 << PERMISSIONS.length; mask++) {
-    combinations.push(PERMISSIONS.filter((_, i) => mask & (1 << i)));
+  for (let mask = 0; mask < 1 << TASK_KEYS.length; mask++) {
+    combinations.push(TASK_KEYS.filter((_, i) => mask & (1 << i)));
   }
 
   it("covers all 16 combinations", () => {

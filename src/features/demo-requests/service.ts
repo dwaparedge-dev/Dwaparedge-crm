@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
 import { AppError } from "@/lib/auth/errors";
+import type { CurrentUser } from "@/lib/auth/current-user";
+import { hasPermission } from "@/lib/auth/permissions";
 import { likePattern } from "@/lib/validation";
 import type { DemoRequestInput, DemoRequestStatus, DemoRequestStatusInput, ListDemoRequestsParams, UpdateDemoRequestInput } from "./schema";
 
@@ -204,6 +206,36 @@ export async function updateDemoRequest(id: string, input: UpdateDemoRequestInpu
     if (notesChanged) {
       await logActivity({ entityType: "demo_request", entityId: id, action: "notes_updated", summary: `Notes updated on the demo request from ${who}`, actorId }, tx);
     }
+  });
+}
+
+/**
+ * Deletes a request for good (needs `demo_requests.delete`). The row is gone; what stays is one line in the activity log saying who
+ * deleted whom and when, with the name and company only (the mobile number and email are not kept: a permanent delete should remove the person's contact details), so a deletion can always be explained. An open auto-raised task for the request
+ * is cancelled in the same transaction, since there is nothing left to call.
+ */
+export async function deleteDemoRequest(id: string, actor: CurrentUser) {
+  if (!hasPermission(actor.permissions, "demo_requests.delete")) throw new AppError("You do not have permission to delete demo requests", 403, "FORBIDDEN");
+  await db.transaction(async (tx) => {
+    const { rows } = await tx.query<{ name: string; company: string; status: string }>(
+      "SELECT name, company, status FROM demo_requests WHERE id = $1 FOR UPDATE", [id]);
+    const cur = rows[0];
+    if (!cur) throw new AppError("Demo request not found", 404, "NOT_FOUND");
+
+    const cancelled = await tx.query<{ id: string; title: string }>(
+      `UPDATE tasks SET status = 'cancelled', follow_up_at = NULL, updated_at = now()
+       WHERE origin = 'auto' AND source_type = 'demo_request' AND source_id = $1 AND status IN ('open','in_progress','waiting')
+       RETURNING id, title`, [id]);
+    for (const t of cancelled.rows) {
+      await logActivity({ entityType: "task", entityId: t.id, action: "status_changed", summary: `Cancelled: the demo request was deleted (${t.title})`, actorId: actor.id, metadata: { to: "cancelled" } }, tx);
+    }
+
+    await tx.query("DELETE FROM demo_requests WHERE id = $1", [id]);
+    await logActivity({
+      entityType: "demo_request", entityId: id, action: "deleted", actorId: actor.id,
+      summary: `Demo request from ${cur.name} (${cur.company}) deleted permanently`,
+      metadata: { status: cur.status },
+    }, tx);
   });
 }
 

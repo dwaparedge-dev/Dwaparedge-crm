@@ -3,7 +3,7 @@ import { assertSameOrigin, errorResponse, readJson } from "@/lib/http";
 import { requireUser } from "@/lib/auth/current-user";
 import { uuid } from "@/lib/validation";
 import { updateDemoRequestSchema } from "@/features/demo-requests/schema";
-import { getDemoRequest, updateDemoRequest } from "@/features/demo-requests/service";
+import { deleteDemoRequest, getDemoRequest, updateDemoRequest } from "@/features/demo-requests/service";
 
 export async function GET(_req: Request, ctx: RouteContext<"/api/demo-requests/[id]">) {
   try {
@@ -19,6 +19,18 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/demo-reque
     assertSameOrigin(request);
     const user = await requireUser();
     await updateDemoRequest(uuid.parse((await ctx.params).id), updateDemoRequestSchema.parse(await readJson(request)), user.id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+/** Deletes the request for good. Needs `demo_requests.delete`; the service checks. */
+export async function DELETE(request: Request, ctx: RouteContext<"/api/demo-requests/[id]">) {
+  try {
+    assertSameOrigin(request);
+    const user = await requireUser();
+    await deleteDemoRequest(uuid.parse((await ctx.params).id), user);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return errorResponse(error);

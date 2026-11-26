@@ -1,7 +1,7 @@
 // Pure helpers, no `server-only`: command-line scripts import this file too.
 
 /** Per-user permission keys stored in users.permissions, in canonical order. */
-export const PERMISSIONS = ["tasks.view_all", "tasks.edit_all", "tasks.assign", "tasks.manage_settings"] as const;
+export const PERMISSIONS = ["tasks.view_all", "tasks.edit_all", "tasks.assign", "tasks.manage_settings", "demo_requests.delete"] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 

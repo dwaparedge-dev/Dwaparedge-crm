@@ -28,6 +28,7 @@ The Task Desk is the first module with per-user access, and it is built so that 
 | `tasks.edit_all` | Change, complete and add notes to **other people's** tasks. Includes `tasks.view_all` |
 | `tasks.assign` | Give a task to someone else, or take an unassigned one ("Take it") |
 | `tasks.manage_settings` | Add, rename, recolour, reorder, hide and delete task categories and priorities |
+| `demo_requests.delete` | Delete a demo request permanently (the Delete button on the Demo requests list and detail page; `DELETE /api/demo-requests/{id}`) |
 
 - **A new account holds none.** Accounts that existed when permissions were introduced were given all four (migration `0017_user_permissions`), because they already had full access; `db:seed-admin` gives the first admin all four.
 - **The command line is the only way to change them in v1** (there is no user screen yet): `npm run users -- permissions --email x`, `grant --email x --permission tasks.view_all`, `revoke ...`, and `create ... --grant a,b`. Run them from a machine that holds the database credential, like every other account command.

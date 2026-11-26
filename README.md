@@ -124,8 +124,9 @@ npm run users -- revoke --email asha@example.com --permission tasks.edit_all
 | `tasks.edit_all` | Change, complete and add notes to other people's tasks (includes `tasks.view_all`) |
 | `tasks.assign` | Give a task to someone else, or take an unassigned one |
 | `tasks.manage_settings` | Add, rename, recolour, reorder, hide and delete task categories and priorities (the two Settings tabs appear only with this) |
+| `demo_requests.delete` | Delete a demo request permanently, after a confirmation popup (a delete button on the Demo requests list and on a request's page) |
 
-The accounts that existed when permissions arrived, and the admin made by `db:seed-admin`, hold all four. A grant or revoke takes effect on the person's next request and is written to the activity log as a command-line change (the command line has no signed-in person). `create --grant` applies only to an account it creates, never to one that already exists. A mistyped key is refused, and the error lists the valid keys.
+The accounts that existed when permissions arrived, and the admin made by `db:seed-admin`, hold all five. A grant or revoke takes effect on the person's next request and is written to the activity log as a command-line change (the command line has no signed-in person). `create --grant` applies only to an account it creates, never to one that already exists. A mistyped key is refused, and the error lists the valid keys.
 
 Users can change their own password from the account menu (top right).
 
