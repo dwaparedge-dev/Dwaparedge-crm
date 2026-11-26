@@ -2,7 +2,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createTestDb, makeUser, type TestDb } from "./helpers";
+import { configureCompany, createTestDb, issuedInvoice, makeClient, makeUser, type TestDb } from "./helpers";
 
 // A minimal stand-in for the request's cookie jar (next/headers only works inside a real request).
 const jar = vi.hoisted(() => new Map<string, string>());
@@ -126,6 +126,46 @@ describe("request protection", () => {
     const invalid = await POST(req("/api/clients", "POST", { legalName: "", gstin: "BAD" }));
     expect(invalid.status).toBe(422);
     expect((await invalid.json()).error.issues.map((i: { path: string[] }) => i.path[0])).toEqual(expect.arrayContaining(["legalName", "gstin"]));
+  });
+});
+
+describe("revising an issued invoice over the API", () => {
+  const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
+  async function signedInWithInvoice() {
+    jar.clear();
+    const u = await makeUser();
+    await loginAs(u.email, u.password);
+    await configureCompany(u.id, "24");
+    const clientId = await makeClient(u.id, { stateCode: "24" });
+    return { u, clientId, ...(await issuedInvoice(u.id, clientId)) }; // total 1180.00
+  }
+  it("needs a reason and a sensible total", async () => {
+    const { id } = await signedInWithInvoice();
+    const { POST } = await import("@/app/api/invoices/[id]/revise/route");
+    expect((await POST(req(`/api/invoices/${id}/revise`, "POST", { total: "1000" }), ctx(id))).status).toBe(422);
+    expect((await POST(req(`/api/invoices/${id}/revise`, "POST", { total: "-1", reason: "x" }), ctx(id))).status).toBe(422);
+  });
+  it("revises the invoice and returns the new version", async () => {
+    const { id, number } = await signedInWithInvoice();
+    const { POST } = await import("@/app/api/invoices/[id]/revise/route");
+    const res = await POST(req(`/api/invoices/${id}/revise`, "POST", { total: "1000", reason: "Agreed with client" }), ctx(id));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ version: 2 });
+    const { getInvoice } = await import("@/features/invoices/service");
+    expect(await getInvoice(id)).toMatchObject({ invoice_number: number, total: "1000.00" });
+  });
+  it("previews a total, and says why one below what is paid is blocked", async () => {
+    const { u, id, clientId } = await signedInWithInvoice();
+    const { recordPayment } = await import("@/features/payments/service");
+    const { paymentInputSchema } = await import("@/features/payments/schema");
+    await recordPayment(paymentInputSchema.parse({ clientId, paymentDate: "2026-10-06", amount: "1180", method: "upi", allocations: [{ invoiceId: id, amount: "1180" }] }), u.id);
+    const { GET } = await import("@/app/api/invoices/[id]/revise/route");
+    const low = await GET(req(`/api/invoices/${id}/revise?total=500`), ctx(id));
+    expect(low.status).toBe(200);
+    expect((await low.json()).blocked).toMatch(/already paid/i);
+    const same = await (await GET(req(`/api/invoices/${id}/revise?total=1180`), ctx(id))).json();
+    expect(same).toMatchObject({ newTotal: "1180.00", blocked: null });
+    expect((await GET(req(`/api/invoices/${id}/revise?total=abc`), ctx(id))).status).toBe(422);
   });
 });
 

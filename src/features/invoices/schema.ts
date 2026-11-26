@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isoDate, optionalText, pageParams, uuid } from "@/lib/validation";
+import { decimal, isoDate, optionalText, pageParams, uuid } from "@/lib/validation";
 import { saleItemSchema } from "@/features/sales/schema";
 
 /** Every invoice line bills a line of the sale it belongs to. */
@@ -17,6 +17,13 @@ export const invoiceInputSchema = z
   })
   .refine((v) => v.dueDate >= v.issueDate, { path: ["dueDate"], message: "Due date cannot be before the issue date" });
 export type InvoiceInput = z.infer<typeof invoiceInputSchema>;
+
+/** The new total of an issued invoice, incl. GST, and why it is being changed. */
+export const reviseTotalSchema = decimal(2, "Total").refine((v) => Number(v) > 0, "The total must be greater than 0");
+export const reviseSchema = z.object({
+  total: reviseTotalSchema,
+  reason: z.string({ error: "A reason is required" }).trim().min(1, "A reason is required").max(500),
+});
 
 export const cancelSchema = z.object({ reason: z.string({ error: "A reason is required" }).trim().min(3, "A reason is required").max(1000) });
 
