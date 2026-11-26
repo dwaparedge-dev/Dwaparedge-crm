@@ -13,6 +13,9 @@ const schema = z.object({
   DEMO_INTAKE_KEY: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(32, "DEMO_INTAKE_KEY must be at least 32 characters").optional()),
   // How long website analytics are kept before they are erased. 395 days = 13 months, the usual ceiling regulators accept for analytics.
   ANALYTICS_RETENTION_DAYS: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().min(30).max(1095).default(395)),
+  // Most connections one server instance may hold open. Default 10. Keep (instances x this) under the database pooler's limit:
+  // the Supabase session pooler allows only 15 in total, the transaction pooler (port 6543) allows far more. Blank = default.
+  DB_POOL_MAX: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().min(1).max(20).default(10)),
   // Auto-raised tasks stay off until this date (YYYY-MM-DD) is set; only records dated on or after it get a task (older ones go through `npm run tasks:backfill`).
   TASKS_AUTO_FROM: z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "TASKS_AUTO_FROM must be YYYY-MM-DD").optional()),
 });

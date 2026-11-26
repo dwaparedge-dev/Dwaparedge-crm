@@ -17,6 +17,7 @@
     "test:db": "vitest run --config vitest.integration.config.mts",
     "check": "npm run typecheck && npm run lint && npm test",
     "tasks:backfill": "tsx --conditions=react-server scripts/tasks-backfill.ts",
+    "db:release-connections": "tsx scripts/db-release-connections.ts",
     "analytics:purge": "tsx --conditions=react-server scripts/analytics-purge.ts"
   },
   "dependencies": {

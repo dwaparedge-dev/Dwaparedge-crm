@@ -52,6 +52,9 @@ The Task Desk is the first module with per-user access, and it is built so that 
 5. Turn on Supabase backups and enable two-step sign-in on the Supabase, Vercel and GitHub accounts.
 6. Look at `npm run users -- events` now and then for repeated failures or sign-ins from places you don't recognise.
 
+## Database connections (Vercel + Supabase)
+Supabase's **session pooler** allows 15 connections in total. Each server instance holds up to `DB_POOL_MAX` (default 10), the sidebar polls every minute, and every dashboard page runs several queries, so a few visitors can use them all; the symptom is `EMAXCONNSESSION` in the logs and the "Something went wrong" page on every screen. Production must use the **transaction pooler** (port 6543) in `DATABASE_URL`, with the session-pooler URL kept in `DIRECT_URL` for migrations. If you ever hit the limit, `npm run db:release-connections` shows who holds connections and `-- --apply` closes the idle ones (only the app's own pooled connections). Do not point a local dev server or test runs at the production database: they share the same small limit.
+
 ## Known limits
 - Apart from the Task Desk's four permissions (see [Per-user permissions](#per-user-permissions)), all staff have the same access and there are no roles. Only create accounts for people who may see and change everything, until the team-rollout phase brings permissions to the other pages.
 - The CSP allows inline scripts and styles (Next.js and the UI library need them); it still blocks every other origin.

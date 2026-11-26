@@ -11,13 +11,17 @@ function createPool(): Pool {
   const schema = process.env.DB_SEARCH_PATH;
   if (schema && !/^vt_[a-z0-9_]+$/.test(schema)) throw new Error("DB_SEARCH_PATH must be a vt_* test schema");
 
-  // Serverless: every instance has its own pool, so keep it small to stay under the database pooler's limit.
-  return new Pool({
+  // Every server instance has its own pool: (instances x DB_POOL_MAX) must stay under the database pooler's limit (see docs/SECURITY.md).
+  const pool = new Pool({
     connectionString: url,
     ssl: isLocal ? false : { rejectUnauthorized: false },
-    max: process.env.VERCEL ? 3 : 10,
+    max: getEnv().DB_POOL_MAX,
     ...(schema ? { options: `-c search_path=${schema}` } : {}),
   });
+  // An idle connection the database or pooler closes (restart, scale-down, an admin freeing connections) raises 'error' on the pool.
+  // Without a listener Node treats it as uncaught and takes the whole instance down; with one, pg drops that connection and opens a new one.
+  pool.on("error", (error) => console.error("Idle database connection closed:", error.message));
+  return pool;
 }
 
 function pool(): Pool {

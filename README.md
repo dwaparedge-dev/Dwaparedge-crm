@@ -84,7 +84,7 @@ Then sign in, open **Settings**, and fill in your company name, address, **state
 ### Supabase setup
 
 1. Create a **new** Supabase project for this app (same account as FactoONE is fine; different project).
-2. *Project Settings → Database → Connect*: copy the **Session pooler** string (port 5432). The direct host (`db.<ref>.supabase.co`) is IPv6-only and fails on many networks and on Vercel; the session pooler works everywhere. Put it in `DATABASE_URL`.
+2. *Project Settings → Database → Connect*: copy the **Session pooler** string (port 5432). The direct host (`db.<ref>.supabase.co`) is IPv6-only and fails on many networks and on Vercel; the session pooler works everywhere. Put it in `DATABASE_URL` for local work. **On Vercel use the transaction pooler instead** (same host, port **6543**): the session pooler allows only 15 connections in total, and serverless instances plus the sidebar's background polling use them up (`EMAXCONNSESSION`, every page fails). The app is safe in transaction mode (it uses no prepared statements or session settings, and its advisory locks are transaction-scoped). Keep the session-pooler string (port 5432) in `DIRECT_URL` for `db:sync` / `db:migrate`.
 3. The app does **not** use Supabase Auth, Storage or the REST API. Supabase is just a hosted Postgres. Because the browser never talks to the database, Row Level Security is not part of the design: **all authorization is in the server code**, and the database credential must stay server-side.
 
 ## Commands
@@ -146,7 +146,7 @@ A sync never drops or rewrites anything, so removing or renaming a column, chang
 ## Deployment (Vercel)
 
 1. Push the repo and import it in Vercel (framework: Next.js; Node 20+).
-2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (session pooler), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it), and `DEMO_INTAKE_KEY` if the FactoOne site should send demo requests (see [docs/API.md](docs/API.md#demo-request-intake-server-to-server)). Use a **different** `JWT_SECRET` and `DEMO_INTAKE_KEY` from local.
+2. Set environment variables for **Production** (and Preview if used): `DATABASE_URL` (**transaction pooler, port 6543**), `JWT_SECRET`, `JWT_EXPIRES_IN_DAYS` (use `1`), `BCRYPT_SALT_ROUNDS`, `RATE_LIMIT_SALT` (the app will not start in production without it), and `DEMO_INTAKE_KEY` if the FactoOne site should send demo requests (see [docs/API.md](docs/API.md#demo-request-intake-server-to-server)). Use a **different** `JWT_SECRET` and `DEMO_INTAKE_KEY` from local.
 3. Sync the schema and create the admin **from your machine** against the production database (`DATABASE_URL=… npm run db:sync && npm run db:seed-admin`) before the first deploy. The build does not migrate automatically, on purpose.
    **Task Desk release order:** run `db:sync` and then `db:migrate` against production **before** the new code goes live (the new code reads `users.permissions`, and the app fails with "column permissions does not exist" until they have run). `db:migrate` gives every existing login all four task permissions (see [Staff accounts](#staff-accounts)); new accounts start with none. Auto-raised tasks stay off until you set `TASKS_AUTO_FROM`; set it to the go-live date, then run `npm run tasks:backfill` (dry run first) only if you want older records raised too.
 4. Pick the Vercel function region closest to your Supabase region (e.g. Supabase `ap-southeast-2` → Vercel `syd1`) to keep database round trips short.
