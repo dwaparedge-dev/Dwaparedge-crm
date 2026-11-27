@@ -22,6 +22,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import PauseCircleIcon from "@mui/icons-material/PauseCircleOutlineOutlined";
 import TodayIcon from "@mui/icons-material/TodayOutlined";
+import FilterToolbar from "@/components/shared/FilterToolbar";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useNotify } from "@/components/common/Notify";
 import { StatCards } from "@/components/common/StatCards";
@@ -36,7 +37,8 @@ import { canViewAll } from "../policy";
 import type { TaskRow as TaskData } from "../queries";
 import { SECTION_ORDER, type Section } from "../sections";
 import { announceTasksChanged } from "../useDeskCounts";
-import { SECTION_LABEL } from "./common";
+import { SECTION_COLOUR, SECTION_LABEL } from "./common";
+import { DayGroups } from "./DayGroups";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import { TaskFormDialog } from "./TaskFormDialog";
 import { TaskTimeDialog, type TimeMode } from "./TaskTimeDialog";
@@ -62,14 +64,7 @@ function saveView(view: View) {
   }
 }
 
-const rowsBox = { m: 0, p: 0, bgcolor: "background.paper", border: "1px solid", borderColor: "divider", borderRadius: "14px", overflow: "hidden" } as const;
-
 const STATUS_DONE_TEXT: Record<RowStatusChange, string> = { in_progress: "Marked in progress", cancelled: "Task cancelled" };
-
-/** A list of rows in a rounded box. */
-function Rows({ children, label }: { children: React.ReactNode; label: string }) {
-  return <Box component="ul" aria-label={label} sx={rowsBox}>{children}</Box>;
-}
 
 /** Overdue, Follow-ups due and the rest, and a heading that opens and closes its section (Parked starts closed). */
 function SectionHeader({ section, count, note, open, onToggle }: { section: Section; count: number; note?: string; open: boolean; onToggle: () => void }) {
@@ -78,12 +73,13 @@ function SectionHeader({ section, count, note, open, onToggle }: { section: Sect
     <Typography component="h2" variant="subtitle2" sx={{ mb: 1 }}>
       <ButtonBase
         id={`${id}-toggle`} onClick={onToggle} aria-expanded={open} aria-controls={id}
-        sx={{ display: "flex", alignItems: "center", gap: 0.75, py: 0.5, borderRadius: 1, textAlign: "left", font: "inherit", color: section === "overdue" ? "error.main" : "text.secondary" }}
+        sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.75, py: 0.75, pr: 1, borderRadius: 1, textAlign: "left", font: "inherit", color: section === "overdue" ? "error.main" : "text.secondary" }}
       >
         <ExpandMoreIcon fontSize="small" sx={{ transform: open ? "none" : "rotate(-90deg)", transition: "transform 150ms" }} />
+        <Box component="span" aria-hidden sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: SECTION_COLOUR[section] }} />
         <Box component="span" sx={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px" }}>{SECTION_LABEL[section]}</Box>
         <Chip size="small" label={count} sx={{ height: 20 }} />
-        {note && <Box component="span" sx={{ fontWeight: 500, color: "text.secondary" }}>{note}</Box>}
+        {note && <Box component="span" sx={{ fontWeight: 500, color: "text.secondary", fontSize: "0.75rem" }}>{note}</Box>}
       </ButtonBase>
     </Typography>
   );
@@ -116,7 +112,9 @@ export function DeskPage() {
   const [form, setForm] = useState<{ task?: TaskData } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [timing, setTiming] = useState<{ task: TaskData; mode: TimeMode } | null>(null);
+  // Every action that changes a task asks first. Cancel keeps its own, stronger wording.
   const [cancelling, setCancelling] = useState<TaskData | null>(null);
+  const [confirming, setConfirming] = useState<{ task: TaskData; kind: "done" | "take" | "in_progress" } | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
   // Sync, then read: opening the Desk raises any auto-tasks that are due, and only then is the list read, so it is never a minute behind.
@@ -189,14 +187,21 @@ export function DeskPage() {
   const rowProps = (task: TaskData, section: Section) => ({
     task, section, today: desk!.today, now, user, showCategory: view === "urgency", busy: busy.has(task.id),
     onOpen: (t: TaskData) => setOpenId(t.id),
-    onDone: (t: TaskData) => void (t.origin === "auto" && t.source_type === "demo_request"
-      ? act(t, () => api(`/api/tasks/${t.id}/mark-contacted`, { method: "POST", body: {} }), "Marked contacted")
-      : setStatus(t, "done")),
-    onTake: (t: TaskData) => void take(t),
+    onDone: (t: TaskData) => setConfirming({ task: t, kind: "done" }),
+    onTake: (t: TaskData) => setConfirming({ task: t, kind: "take" }),
     onEdit: (t: TaskData) => setForm({ task: t }),
     onTime: (t: TaskData, mode: TimeMode) => setTiming({ task: t, mode }),
-    onStatus: (t: TaskData, status: RowStatusChange) => (status === "cancelled" ? setCancelling(t) : void setStatus(t, status)),
+    onStatus: (t: TaskData, status: RowStatusChange) => (status === "cancelled" ? setCancelling(t) : setConfirming({ task: t, kind: "in_progress" })),
   });
+
+  /** The confirmed action, run exactly as the row buttons used to run it directly. */
+  const runConfirmed = ({ task: t, kind }: NonNullable<typeof confirming>) => {
+    setConfirming(null);
+    if (kind === "take") return void take(t);
+    if (kind === "in_progress") return void setStatus(t, "in_progress");
+    if (t.origin === "auto" && t.source_type === "demo_request") return void act(t, () => api(`/api/tasks/${t.id}/mark-contacted`, { method: "POST", body: {} }), "Marked contacted");
+    void setStatus(t, "done");
+  };
 
   const counts = desk?.counts;
   const stats = [
@@ -224,48 +229,45 @@ export function DeskPage() {
 
       {!desk ? (error ? null : <DeskSkeleton />) : (
         <Box aria-busy={loading}>
-          <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2, mb: 1.5 }}>
-            <ToggleButtonGroup exclusive size="small" color="primary" value={view} aria-label="Group tasks" onChange={(_, v: View | null) => { if (v) pickView(v); }}>
-              <ToggleButton value="urgency" sx={{ px: 2 }}>By urgency</ToggleButton>
-              <ToggleButton value="category" sx={{ px: 2 }}>By category</ToggleButton>
-            </ToggleButtonGroup>
-            {seeOthers && (
-              <TextField id="desk-owner" select size="small" label="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} sx={{ minWidth: { xs: "100%", sm: 240 } }}>
-                <MenuItem value="me">Me + Unassigned</MenuItem>
-                <MenuItem value="all">Everyone</MenuItem>
-                <MenuItem value="unassigned">Unassigned</MenuItem>
-                {(staff.data?.items ?? []).map((s) => <MenuItem key={s.id} value={s.id}>{s.id === user.id ? `${s.name} (me)` : s.name}</MenuItem>)}
-              </TextField>
-            )}
-            {sectionFilter && <Chip label={`Only ${SECTION_LABEL[sectionFilter]}`} onDelete={() => setSectionFilter(null)} />}
-          </Box>
-
-          {desk.categories.length > 0 && (
-            <Box role="group" aria-label="Filter by category" sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 3 }}>
-              <Chip label={`All · ${total}`} clickable aria-pressed={category === null} color={category === null ? "primary" : "default"} variant={category === null ? "filled" : "outlined"} onClick={() => setCategoryFilter(null)} />
-              {desk.categories.map((c) => (
-                <Chip
-                  key={c.id} label={`${c.name} · ${c.count}`} clickable aria-pressed={category === c.id}
-                  color={category === c.id ? "primary" : "default"} variant={category === c.id ? "filled" : "outlined"}
-                  onClick={() => setCategoryFilter(category === c.id ? null : c.id)}
-                />
-              ))}
-            </Box>
-          )}
-
-          {priorities.length > 1 && (
-            <Box role="group" aria-label="Filter by priority" sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1, mb: 3, mt: desk.categories.length > 0 ? -1.5 : 0 }}>
-              <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", textTransform: "uppercase", letterSpacing: "0.5px", mr: 0.5 }}>Priority</Typography>
-              {priorities.map((p) => (
-                <Chip
-                  key={p.id} size="small" clickable aria-pressed={priority === p.id} label={`${p.name} · ${p.count}`}
-                  variant={priority === p.id ? "filled" : "outlined"}
-                  icon={<Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: p.colour, ml: "8px !important" }} />}
-                  onClick={() => setPriorityFilter(priority === p.id ? null : p.id)}
-                />
-              ))}
-            </Box>
-          )}
+          <FilterToolbar
+            sx={{ mb: 3 }}
+            leftFilters={
+              <>
+                <ToggleButtonGroup
+                  exclusive size="small" color="primary" value={view} aria-label="Group tasks" onChange={(_, v: View | null) => { if (v) pickView(v); }}
+                  sx={{ width: { xs: "100%", sm: "auto" }, "& .MuiToggleButton-root": { flex: { xs: 1, sm: "none" }, px: 2, height: 38, fontWeight: 600 } }}
+                >
+                  <ToggleButton value="urgency">By urgency</ToggleButton>
+                  <ToggleButton value="category">By category</ToggleButton>
+                </ToggleButtonGroup>
+                {seeOthers && (
+                  <TextField id="desk-owner" select size="small" label="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 190 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
+                    <MenuItem value="me">Me + Unassigned</MenuItem>
+                    <MenuItem value="all">Everyone</MenuItem>
+                    <MenuItem value="unassigned">Unassigned</MenuItem>
+                    {(staff.data?.items ?? []).map((s) => <MenuItem key={s.id} value={s.id}>{s.id === user.id ? `${s.name} (me)` : s.name}</MenuItem>)}
+                  </TextField>
+                )}
+                {desk.categories.length > 0 && (
+                  <TextField id="desk-category" select size="small" label="Category" value={category ?? ""} onChange={(e) => setCategoryFilter(e.target.value || null)} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 190 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
+                    <MenuItem value="">{`All categories · ${total}`}</MenuItem>
+                    {desk.categories.map((c) => <MenuItem key={c.id} value={c.id}>{`${c.name} · ${c.count}`}</MenuItem>)}
+                  </TextField>
+                )}
+                {priorities.length > 1 && (
+                  <TextField id="desk-priority" select size="small" label="Priority" value={priority ?? ""} onChange={(e) => setPriorityFilter(e.target.value || null)} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 190 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
+                    <MenuItem value="">All priorities</MenuItem>
+                    {priorities.map((p) => (
+                      <MenuItem key={p.id} value={p.id}>
+                        <Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: p.colour, mr: 1, display: "inline-block" }} />{`${p.name} · ${p.count}`}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                )}
+                {sectionFilter && <Chip label={`Only ${SECTION_LABEL[sectionFilter]}`} onDelete={() => setSectionFilter(null)} />}
+              </>
+            }
+          />
 
           {total === 0 ? (
             <EmptyState title="Nothing pending" hint="No open tasks in this view." action={<Button variant="contained" startIcon={<AddIcon />} onClick={() => setForm({})}>New task</Button>} />
@@ -281,7 +283,7 @@ export function DeskPage() {
                 <Box component="section" key={s} sx={{ mb: 3 }}>
                   <SectionHeader section={s} count={rows.length} note={note} open={isOpen(s)} onToggle={() => setExpanded((e) => ({ ...e, [s]: !isOpen(s) }))} />
                   <Box id={`desk-section-${s}`} hidden={!isOpen(s)}>
-                    {isOpen(s) && <Rows label={SECTION_LABEL[s]}>{rows.map((t) => <TaskRow key={t.id} {...rowProps(t, s)} />)}</Rows>}
+                    {isOpen(s) && <DayGroups label={SECTION_LABEL[s]} today={desk.today} items={rows.map((t) => ({ task: t, section: s }))} render={(t, sec) => <TaskRow key={t.id} {...rowProps(t, sec)} />} />}
                   </Box>
                 </Box>
               );
@@ -295,7 +297,7 @@ export function DeskPage() {
                   <Box component="section" key={b.id} sx={{ mb: 3 }}>
                     <SectionHeader section="parked" count={b.tasks.length} note={note} open={isOpen("parked")} onToggle={() => setExpanded((e) => ({ ...e, parked: !isOpen("parked") }))} />
                     <Box id="desk-section-parked" hidden={!isOpen("parked")}>
-                      {isOpen("parked") && <Rows label={b.name}>{b.tasks.map(({ task, section }) => <TaskRow key={task.id} {...rowProps(task, section)} showCategory />)}</Rows>}
+                      {isOpen("parked") && <DayGroups label={b.name} today={desk.today} items={b.tasks} render={(t, sec) => <TaskRow key={t.id} {...rowProps(t, sec)} showCategory />} />}
                     </Box>
                   </Box>
                 );
@@ -307,7 +309,7 @@ export function DeskPage() {
                     {b.name}
                     <Chip size="small" label={b.tasks.length} sx={{ height: 20 }} />
                   </Typography>
-                  <Rows label={b.name}>{b.tasks.map(({ task, section }) => <TaskRow key={task.id} {...rowProps(task, section)} />)}</Rows>
+                  <DayGroups label={b.name} today={desk.today} items={b.tasks} render={(t, sec) => <TaskRow key={t.id} {...rowProps(t, sec)} />} />
                 </Box>
               );
             })
@@ -328,6 +330,28 @@ export function DeskPage() {
         />
       )}
       {openId && desk && <TaskDetailPanel key={openId} taskId={openId} today={desk.today} onClose={() => setOpenId(null)} />}
+
+      {confirming && (() => {
+        const { task: t, kind } = confirming;
+        const contacting = kind === "done" && t.origin === "auto" && t.source_type === "demo_request";
+        const copy = {
+          done: { title: contacting ? "Mark as contacted?" : "Mark this task done?", text: contacting ? "The demo request is marked contacted and this task leaves the Desk." : "It leaves the Desk and moves to Closed. You can reopen it later.", action: contacting ? "Mark contacted" : "Mark done" },
+          take: { title: "Take this task?", text: "It will be assigned to you.", action: "Take it" },
+          in_progress: { title: "Mark as in progress?", text: "The task stays on the Desk with the status In progress.", action: "Mark in progress" },
+        }[kind];
+        return (
+          <Dialog open onClose={() => setConfirming(null)} maxWidth="xs" fullWidth>
+            <DialogTitle>{copy.title}</DialogTitle>
+            <DialogContent>
+              <DialogContentText>&ldquo;{t.title}&rdquo;. {copy.text}</DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setConfirming(null)}>Not now</Button>
+              <Button id="task-confirm" variant="contained" autoFocus onClick={() => runConfirmed(confirming)}>{copy.action}</Button>
+            </DialogActions>
+          </Dialog>
+        );
+      })()}
 
       {cancelling && (
         <Dialog open onClose={() => setCancelling(null)} maxWidth="xs" fullWidth>

@@ -215,3 +215,15 @@ describe("filterSections", () => {
     expect(s.today).toHaveLength(1);
   });
 });
+
+describe("dayRail and groupByDay", () => {
+  it("names the weekday, day and month of a date", async () => {
+    const { dayRail } = await import("@/features/tasks/display");
+    expect(dayRail("2026-12-03")).toEqual({ weekday: "Thu", day: "3", month: "Dec" });
+  });
+  it("gathers tasks under their date in first-seen order, undated last seen where they first appear", async () => {
+    const { groupByDay } = await import("@/features/tasks/display");
+    const groups = groupByDay([{ id: 1, due_date: "2026-12-03" }, { id: 2, due_date: null }, { id: 3, due_date: "2026-12-03" }, { id: 4, due_date: "2026-12-04" }]);
+    expect(groups.map((g) => [g.date, g.tasks.map((t) => t.id)])).toEqual([["2026-12-03", [1, 3]], [null, [2]], ["2026-12-04", [4]]]);
+  });
+});

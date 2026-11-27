@@ -4,6 +4,11 @@ import NextLink from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import Drawer from "@mui/material/Drawer";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
@@ -78,8 +83,10 @@ function NoteBox({ taskId, onAdded }: { taskId: string; onAdded: () => void }) {
 function ReopenButton({ task, onReopened }: { task: TaskDetail; onReopened: () => void }) {
   const notify = useNotify();
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
 
   async function reopen() {
+    setAsking(false);
     setBusy(true);
     try {
       await api(`/api/tasks/${task.id}/status`, { method: "POST", body: { status: "open" } });
@@ -96,9 +103,19 @@ function ReopenButton({ task, onReopened }: { task: TaskDetail; onReopened: () =
 
   return (
     <Box sx={{ mb: 2 }}>
-      <Button id="task-reopen" variant="outlined" size="small" startIcon={<ReplayIcon />} disabled={busy} onClick={reopen} aria-label={`Reopen: ${task.title}`}>
+      <Button id="task-reopen" variant="outlined" size="small" startIcon={<ReplayIcon />} disabled={busy} onClick={() => setAsking(true)} aria-label={`Reopen: ${task.title}`}>
         {busy ? "Reopening…" : "Reopen"}
       </Button>
+      {asking && (
+        <Dialog open onClose={() => setAsking(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Reopen this task?</DialogTitle>
+          <DialogContent><DialogContentText>&ldquo;{task.title}&rdquo; goes back to Open and returns to the Desk.</DialogContentText></DialogContent>
+          <DialogActions>
+            <Button onClick={() => setAsking(false)}>Not now</Button>
+            <Button variant="contained" autoFocus onClick={reopen}>Reopen</Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   );
 }
@@ -178,13 +195,13 @@ export function TaskDetailPanel({ taskId, today, onClose, onChanged }: PanelProp
       anchor="right" open onClose={onClose}
       slotProps={{ paper: { role: "dialog", "aria-modal": true, "aria-labelledby": TITLE_ID, sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100%" } } }}
     >
-      <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1, px: 2.5, py: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+      <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1, px: { xs: 2, sm: 2.5 }, py: 2, pt: { xs: "max(16px, env(safe-area-inset-top))", sm: 2 }, borderBottom: "1px solid", borderColor: "divider", position: "sticky", top: 0, zIndex: 1, bgcolor: "background.paper" }}>
         <Typography id={TITLE_ID} component="h2" variant="h6" sx={{ fontWeight: 700, fontSize: "1.1rem", overflowWrap: "anywhere" }}>
           {data?.title ?? "Task"}
         </Typography>
-        <IconButton onClick={onClose} size="small" aria-label="Close task details"><CloseIcon fontSize="small" /></IconButton>
+        <IconButton onClick={onClose} aria-label="Close task details" sx={{ mt: -0.5, mr: -0.75 }}><CloseIcon fontSize="small" /></IconButton>
       </Box>
-      <Box sx={{ px: 2.5, py: 2, overflowY: "auto" }}>
+      <Box sx={{ px: { xs: 2, sm: 2.5 }, py: 2, pb: { xs: "max(24px, env(safe-area-inset-bottom))", sm: 2 }, overflowY: "auto" }}>
         {data ? (
           <Details task={data} today={today} onNoteAdded={reload} onReopened={() => { reload(); onChanged?.(); }} />
         ) : error ? (

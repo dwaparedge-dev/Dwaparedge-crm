@@ -7,6 +7,8 @@ import Chip from "@mui/material/Chip";
 import Link from "@mui/material/Link";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import type { GridColDef } from "@mui/x-data-grid";
 import { ClientPicker } from "@/components/common/ClientPicker";
@@ -26,6 +28,7 @@ import type { TaskRow as TaskData } from "../queries";
 import { TASK_STATUSES } from "../schema";
 import { useTaskFilters } from "../useTaskFilters";
 import { CategoryChip, PriorityChip, STATUS_LABEL } from "./common";
+import { TaskCardList } from "./TaskCardList";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 
 interface ListResponse { items: TaskData[]; total: number; page: number; pageSize: number }
@@ -59,6 +62,8 @@ export function AllTasksList() {
   const seeAll = canViewAll(user);
   const { filters, update, clear, text, setText, resetCount } = useTaskFilters();
   const [openId, setOpenId] = useState<string | null>(null);
+  // Under 900px wide the table is a list of cards: eight columns do not fit a phone.
+  const compact = useMediaQuery(useTheme().breakpoints.down("md"));
 
   const categories = useFetch<{ items: CategoryRow[] }>("/api/task-categories?all=true");
   const priorities = useFetch<{ items: PriorityRow[] }>("/api/task-priorities?all=true");
@@ -132,22 +137,22 @@ export function AllTasksList() {
         search={{ value: text, onChange: setText, placeholder: "Search title and description", label: "Search tasks" }}
         filters={
           <>
-            <TextField select size="small" label="Category" value={filters.categoryId} onChange={(e) => update({ categoryId: e.target.value })} sx={{ minWidth: 170 }}>
+            <TextField select size="small" label="Category" value={filters.categoryId} onChange={(e) => update({ categoryId: e.target.value })} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 170 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
               <MenuItem value="">All categories</MenuItem>
               {categoryOptions.map((o) => <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>)}
             </TextField>
-            <TextField select size="small" label="Priority" value={filters.priorityId} onChange={(e) => update({ priorityId: e.target.value })} sx={{ minWidth: 150 }}>
+            <TextField select size="small" label="Priority" value={filters.priorityId} onChange={(e) => update({ priorityId: e.target.value })} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 150 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
               <MenuItem value="">All priorities</MenuItem>
               {priorityOptions.map((o) => <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>)}
             </TextField>
             {seeAll && (
-              <TextField select size="small" label="Owner" value={filters.ownerId} onChange={(e) => update({ ownerId: e.target.value })} sx={{ minWidth: 170 }}>
+              <TextField select size="small" label="Owner" value={filters.ownerId} onChange={(e) => update({ ownerId: e.target.value })} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 170 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
                 <MenuItem value="">Anyone</MenuItem>
                 <MenuItem value="unassigned">Unassigned</MenuItem>
                 {ownerOptions.map((o) => <MenuItem key={o.id} value={o.id}>{o.name}</MenuItem>)}
               </TextField>
             )}
-            <TextField select size="small" label="Source" value={filters.origin} onChange={(e) => update({ origin: e.target.value as TaskListFilters["origin"] })} sx={{ minWidth: 170 }}>
+            <TextField select size="small" label="Source" value={filters.origin} onChange={(e) => update({ origin: e.target.value as TaskListFilters["origin"] })} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 170 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}>
               <MenuItem value="">Any source</MenuItem>
               <MenuItem value="manual">Added by hand</MenuItem>
               <MenuItem value="auto">Raised by the CRM</MenuItem>
@@ -157,11 +162,11 @@ export function AllTasksList() {
             </Box>
             <TextField
               type="date" size="small" label="Due from" value={filters.dueFrom} onChange={(e) => update({ dueFrom: e.target.value })}
-              slotProps={{ inputLabel: { shrink: true } }} sx={{ minWidth: 160 }}
+              slotProps={{ inputLabel: { shrink: true } }} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 160 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}
             />
             <TextField
               type="date" size="small" label="Due to" value={filters.dueTo} onChange={(e) => update({ dueTo: e.target.value })}
-              slotProps={{ inputLabel: { shrink: true } }} sx={{ minWidth: 160 }}
+              slotProps={{ inputLabel: { shrink: true } }} sx={{ minWidth: { xs: "calc(50% - 6px)", sm: 160 }, flex: { xs: "1 1 calc(50% - 6px)", sm: "0 0 auto" } }}
             />
             {hasNarrowingFilters(filters) && <Button size="small" onClick={clear}>Clear filters</Button>}
           </>
@@ -169,16 +174,23 @@ export function AllTasksList() {
         tabs={<SegmentedTabs label="Task status" value={filters.status} onChange={(v) => { if (isStatusFilter(v)) update({ status: v }); }} tabs={STATUS_TABS} />}
       >
         {error ? <Box sx={{ p: 2 }}><ErrorState message={error} onRetry={reload} /></Box> : (
-          <DataTable<TaskData>
-            label="Tasks" rows={data?.items ?? []} columns={columns} total={data?.total ?? 0} loading={loading}
-            page={filters.page - 1} pageSize={filters.pageSize} onPageChange={(p, size) => update({ page: p + 1, pageSize: size })}
-            onRowClick={(t) => setOpenId(t.id)}
-            emptyTitle={empty.title} emptyHint={empty.hint}
-            emptyAction={
-              pastTheEnd ? <Button variant="outlined" onClick={() => update({ page: 1 })}>Back to the first page</Button>
-              : hasNarrowingFilters(filters) ? <Button variant="outlined" onClick={clear}>Clear filters</Button> : undefined
-            }
-          />
+          (() => {
+            const emptyAction = pastTheEnd ? <Button variant="outlined" onClick={() => update({ page: 1 })}>Back to the first page</Button>
+              : hasNarrowingFilters(filters) ? <Button variant="outlined" onClick={clear}>Clear filters</Button> : undefined;
+            return compact ? (
+              <TaskCardList
+                rows={data?.items ?? []} total={data?.total ?? 0} loading={loading} page={filters.page} pageSize={filters.pageSize} today={today}
+                onPage={(p) => update({ page: p })} onOpen={(t) => setOpenId(t.id)} emptyTitle={empty.title} emptyHint={empty.hint} emptyAction={emptyAction}
+              />
+            ) : (
+              <DataTable<TaskData>
+                label="Tasks" rows={data?.items ?? []} columns={columns} total={data?.total ?? 0} loading={loading}
+                page={filters.page - 1} pageSize={filters.pageSize} onPageChange={(p, size) => update({ page: p + 1, pageSize: size })}
+                onRowClick={(t) => setOpenId(t.id)}
+                emptyTitle={empty.title} emptyHint={empty.hint} emptyAction={emptyAction}
+              />
+            );
+          })()
         )}
       </ListLayout>
       {openId && <TaskDetailPanel key={openId} taskId={openId} today={today} onClose={() => setOpenId(null)} onChanged={reload} />}

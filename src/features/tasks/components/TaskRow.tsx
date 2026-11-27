@@ -7,8 +7,12 @@ import IconButton from "@mui/material/IconButton";
 import Link from "@mui/material/Link";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
-import Typography from "@mui/material/Typography";
+import Tooltip from "@mui/material/Tooltip";
+import BusinessIcon from "@mui/icons-material/BusinessOutlined";
 import CheckIcon from "@mui/icons-material/Check";
+import EventIcon from "@mui/icons-material/EventOutlined";
+import HistoryIcon from "@mui/icons-material/HistoryOutlined";
+import HourglassIcon from "@mui/icons-material/HourglassEmptyOutlined";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import PersonAddIcon from "@mui/icons-material/PersonAddAlt1Outlined";
 import type { CurrentUserValue } from "@/components/layout/CurrentUserContext";
@@ -17,7 +21,7 @@ import { dueText, followUpsText, formatWhen } from "../display";
 import { canAssign, canEditRow } from "../policy";
 import type { TaskRow as TaskData } from "../queries";
 import { isFollowUpDue, isStuck, type Section } from "../sections";
-import { CategoryChip, PriorityChip, STATUS_LABEL } from "./common";
+import { CategoryChip, MetaItem, OwnerAvatar, PriorityChip, STATUS_LABEL } from "./common";
 import type { TimeMode } from "./TaskTimeDialog";
 
 export type RowStatusChange = "in_progress" | "cancelled";
@@ -51,17 +55,27 @@ export function TaskRow({ task: t, section, today, now, user, showCategory, busy
   const canTake = t.owner_id === null && canAssign(user);
   const late = t.due_date !== null && daysUntil(t.due_date, today) < 0;
   const followUpDue = isFollowUpDue({ status: t.status, dueDate: t.due_date, followUpAt: t.follow_up_at }, now);
+  const contacting = t.origin === "auto" && t.source_type === "demo_request";
+  const doneLabel = contacting ? "Mark contacted" : "Done";
 
   return (
     <Box
       component="li"
       sx={{
-        listStyle: "none", display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1fr) auto" }, gap: 1, alignItems: "center",
-        px: { xs: 1.5, sm: 2 }, py: 1.5, borderBottom: "1px solid", borderColor: "divider", "&:last-of-type": { borderBottom: 0 }, opacity: busy ? 0.55 : 1,
+        listStyle: "none", display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1fr) auto" }, gap: { xs: 1, sm: 2 }, alignItems: "center",
+        px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: "background.paper", border: "1px solid", borderColor: "divider", borderLeft: "4px solid", borderLeftColor: t.priority_colour,
+        borderRadius: "12px", opacity: busy ? 0.55 : 1, transition: "box-shadow 120ms, border-color 120ms", "&:hover": { boxShadow: "0 4px 16px rgba(15, 23, 42, 0.08)" },
       }}
     >
       <Box sx={{ minWidth: 0 }}>
-        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.75, mb: 0.5 }}>
+        <Link
+          component="button" type="button" underline="hover" onClick={() => onOpen(t)} aria-haspopup="dialog"
+          sx={{ display: "block", maxWidth: "100%", textAlign: "left", fontWeight: 600, fontSize: "0.9375rem", lineHeight: 1.4, color: "text.primary", overflowWrap: "anywhere", py: 0.25 }}
+        >
+          {t.title}
+        </Link>
+
+        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.75, mt: 0.75 }}>
           <PriorityChip name={t.priority_name} colour={t.priority_colour} />
           {showCategory && <CategoryChip name={t.category_name} colour={t.category_colour} />}
           {!showCategory && section === "parked" && <Chip size="small" variant="outlined" label="Parked" />}
@@ -70,41 +84,45 @@ export function TaskRow({ task: t, section, today, now, user, showCategory, busy
           {isStuck(t.follow_up_count) && <Chip size="small" color="warning" label="Stuck" />}
         </Box>
 
-        <Link
-          component="button" type="button" underline="hover" onClick={() => onOpen(t)} aria-haspopup="dialog"
-          sx={{ display: "block", maxWidth: "100%", textAlign: "left", fontWeight: 600, fontSize: "0.95rem", lineHeight: 1.4, color: "text.primary", overflowWrap: "anywhere" }}
-        >
-          {t.title}
-        </Link>
-
-        <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 1.5, rowGap: 0.25, mt: 0.5, color: "text.secondary" }}>
-          {t.client_name && <Typography variant="caption">{t.client_name}</Typography>}
-          <Typography variant="caption" sx={late ? { color: "error.main", fontWeight: 600 } : undefined}>{dueText(t.due_date, today)}</Typography>
-          {section === "parked" && t.follow_up_at && <Typography variant="caption">Back {formatWhen(t.follow_up_at)}</Typography>}
+        <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 2, rowGap: 0.5, mt: 1 }}>
+          <MetaItem icon={<EventIcon />} colour={late ? "error.main" : undefined} weight={late ? 600 : undefined}>{dueText(t.due_date, today)}</MetaItem>
+          <MetaItem icon={<OwnerAvatar name={t.owner_name} />}>{t.owner_name ?? "Unassigned"}</MetaItem>
+          {t.client_name && <MetaItem icon={<BusinessIcon />}>{t.client_name}</MetaItem>}
+          {section === "parked" && t.follow_up_at && <MetaItem icon={<HistoryIcon />}>Back {formatWhen(t.follow_up_at)}</MetaItem>}
           {t.status !== "open" && (
-            <Typography variant="caption">{STATUS_LABEL[t.status]}{t.status === "waiting" && t.waiting_on ? ` on ${t.waiting_on}` : ""}</Typography>
+            <MetaItem icon={<HourglassIcon />}>{STATUS_LABEL[t.status]}{t.status === "waiting" && t.waiting_on ? ` on ${t.waiting_on}` : ""}</MetaItem>
           )}
-          {t.follow_up_count > 0 && <Typography variant="caption">{followUpsText(t.follow_up_count)}</Typography>}
-          <Typography variant="caption">{t.owner_name ? `Owner: ${t.owner_name}` : "Unassigned"}</Typography>
+          {t.follow_up_count > 0 && <MetaItem icon={<HistoryIcon />}>{followUpsText(t.follow_up_count)}</MetaItem>}
         </Box>
       </Box>
 
-      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, justifySelf: { xs: "start", sm: "end" } }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, justifySelf: { xs: "stretch", sm: "end" } }}>
         {canEdit && (
-          <Button size="small" variant="outlined" startIcon={<CheckIcon />} disabled={busy} onClick={() => onDone(t)} aria-label={`${t.source_type === "demo_request" ? "Mark contacted" : "Done"}: ${t.title}`}>{t.origin === "auto" && t.source_type === "demo_request" ? "Mark contacted" : "Done"}</Button>
+          <Button
+            size="small" variant="outlined" color="success" startIcon={<CheckIcon />} disabled={busy} onClick={() => onDone(t)} aria-label={`${doneLabel}: ${t.title}`}
+            sx={{ borderRadius: 10, flex: { xs: 1, sm: "none" } }}
+          >
+            {doneLabel}
+          </Button>
         )}
         {canEdit && (
-          <Button size="small" variant="outlined" disabled={busy} onClick={() => onTime(t, "followup")} aria-label={`Follow up: ${t.title}`}>Follow up</Button>
+          <Button size="small" variant="outlined" disabled={busy} onClick={() => onTime(t, "followup")} aria-label={`Follow up: ${t.title}`} sx={{ display: { xs: "none", md: "inline-flex" }, borderRadius: 10 }}>Follow up</Button>
         )}
         {canTake && (
-          <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} disabled={busy} onClick={() => onTake(t)} aria-label={`Take it: ${t.title}`}>Take it</Button>
+          <>
+            <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} disabled={busy} onClick={() => onTake(t)} aria-label={`Take it: ${t.title}`} sx={{ display: { xs: "none", sm: "inline-flex" }, borderRadius: 10 }}>Take it</Button>
+            <Tooltip title="Take it">
+              <IconButton size="small" disabled={busy} onClick={() => onTake(t)} aria-label={`Take it: ${t.title}`} sx={{ display: { xs: "inline-flex", sm: "none" } }}><PersonAddIcon fontSize="small" /></IconButton>
+            </Tooltip>
+          </>
         )}
         {canEdit && (
           <>
-            <IconButton size="small" disabled={busy} onClick={(e) => setAnchor(e.currentTarget)} aria-label={`More actions: ${t.title}`} aria-haspopup="menu" aria-expanded={Boolean(anchor)}>
+            <IconButton disabled={busy} onClick={(e) => setAnchor(e.currentTarget)} aria-label={`More actions: ${t.title}`} aria-haspopup="menu" aria-expanded={Boolean(anchor)}>
               <MoreVertIcon fontSize="small" />
             </IconButton>
             <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={closeMenu}>
+              <MenuItem sx={{ display: { md: "none" } }} onClick={() => { closeMenu(); onTime(t, "followup"); }}>Follow up</MenuItem>
               <MenuItem onClick={() => { closeMenu(); onEdit(t); }}>Edit</MenuItem>
               <MenuItem onClick={() => { closeMenu(); onTime(t, "snooze"); }}>Snooze</MenuItem>
               {t.status !== "waiting" && <MenuItem onClick={() => { closeMenu(); onTime(t, "waiting"); }}>Mark waiting</MenuItem>}

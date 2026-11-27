@@ -140,3 +140,24 @@ export function groupByCategory(sections: Record<Section, TaskRow[]>, categories
   }
   return out;
 }
+
+const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** The calendar rail beside a day's tasks: "Thu", "3", "Dec", from a `YYYY-MM-DD` date. */
+export function dayRail(date: string): { weekday: string; day: string; month: string } {
+  const [y, m, d] = date.split("-").map(Number);
+  const weekday = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+  return { weekday: WEEKDAYS_SHORT[weekday]!, day: String(d), month: MONTHS[m! - 1]! };
+}
+
+/** Tasks in the order given, gathered under their due date; a task with no due date goes under `null`. The order of days is the order they first appear. */
+export function groupByDay<T extends { due_date: string | null }>(tasks: T[]): { date: string | null; tasks: T[] }[] {
+  const groups: { date: string | null; tasks: T[] }[] = [];
+  const index = new Map<string | null, { date: string | null; tasks: T[] }>();
+  for (const t of tasks) {
+    let g = index.get(t.due_date);
+    if (!g) { g = { date: t.due_date, tasks: [] }; index.set(t.due_date, g); groups.push(g); }
+    g.tasks.push(t);
+  }
+  return groups;
+}
