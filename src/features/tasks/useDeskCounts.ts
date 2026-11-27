@@ -18,15 +18,21 @@ export const announceTasksChanged = () => window.dispatchEvent(new Event(CHANGED
  * a task that falls due shows up without a reload. Each count also runs the auto-task sync on the server.
  */
 export function useDeskCounts(): DeskCounts {
+  return useDeskSummary().counts;
+}
+
+/** The same counts, and whether the first answer has arrived (before it, the zeros are only the starting value). */
+export function useDeskSummary(): { counts: DeskCounts; loaded: boolean } {
   const pathname = usePathname();
   const [counts, setCounts] = useState<DeskCounts>(NO_COUNTS);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
       if (document.visibilityState !== "visible") return;
       api<{ counts: DeskCounts }>("/api/tasks/sync", { method: "POST" })
-        .then((result) => { if (!cancelled) setCounts(result.counts); })
+        .then((result) => { if (!cancelled) { setCounts(result.counts); setLoaded(true); } })
         .catch(() => undefined); // a badge is not worth an error message
     };
     load();
@@ -41,5 +47,5 @@ export function useDeskCounts(): DeskCounts {
     };
   }, [pathname]);
 
-  return counts;
+  return { counts, loaded };
 }

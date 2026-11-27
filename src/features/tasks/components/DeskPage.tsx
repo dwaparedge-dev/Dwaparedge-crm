@@ -98,7 +98,7 @@ function DeskSkeleton() {
 }
 
 /** The founders' morning screen: what needs doing, most urgent first. Spec section 4. */
-export function DeskPage() {
+export function DeskPage({ initialSection = null }: { initialSection?: Section | null } = {}) {
   const user = useCurrentUser();
   const notify = useNotify();
   const seeOthers = canViewAll(user);
@@ -107,8 +107,8 @@ export function DeskPage() {
   const [owner, setOwner] = useState("me");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
-  const [sectionFilter, setSectionFilter] = useState<Section | null>(null);
-  const [expanded, setExpanded] = useState<Partial<Record<Section, boolean>>>({});
+  const [sectionFilter, setSectionFilter] = useState<Section | null>(initialSection);
+  const [expanded, setExpanded] = useState<Partial<Record<Section, boolean>>>(initialSection === "parked" ? { parked: true } : {});
   const [form, setForm] = useState<{ task?: TaskData } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [timing, setTiming] = useState<{ task: TaskData; mode: TimeMode } | null>(null);

@@ -22,6 +22,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import AddIcon from "@mui/icons-material/Add";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import CheckIcon from "@mui/icons-material/CheckCircleOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WarningIcon from "@mui/icons-material/WarningAmberOutlined";
 import { format, parse, parseISO } from "date-fns";
@@ -36,7 +37,8 @@ import { useFetch } from "@/components/common/useFetch";
 import { RANGE_PRESETS, presetRange, type RangePreset } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import { RecordPaymentDialog } from "@/features/payments/components/RecordPaymentDialog";
-import { useDeskCounts } from "@/features/tasks/useDeskCounts";
+import { deskHref, needsYou } from "@/features/tasks/needs-you";
+import { useDeskSummary } from "@/features/tasks/useDeskCounts";
 import type { getDashboard } from "../service";
 import { compactInr } from "./compact";
 
@@ -48,6 +50,7 @@ const INK = "#384152";
 const GREEN = "#2E7D32";
 const AMBER = "#FDB528";
 const RED = "#FF4D49";
+const AMBER_TEXT = "#B7791F"; // amber dark enough to read as text
 const CYAN = "#26C6F9";
 const GREY = "#9AA3B2";
 
@@ -90,31 +93,43 @@ function Kpi({ label, value, footer, color, href, spark, tone }: { label: string
 }
 
 /**
- * What on the Task Desk is waiting for you right now: overdue tasks and follow-ups that have come back. It links to the Desk.
- * It is left out when both are zero. (The count starts at zero until the first answer arrives, so a calm "All clear" here would
- * show for a moment on a Dashboard that does have something waiting.) Same look as the cards beside it.
+ * What on the Task Desk is waiting for you right now: overdue tasks (red warning), follow-ups that have come back and tasks due
+ * today (amber warnings). Each figure opens the Desk at that section; "Open the Desk" opens all of it. Nothing is drawn until the
+ * first count has arrived (the starting zeros would otherwise flash "Nothing due today" on a Dashboard that has something waiting).
  */
 function NeedsYouToday() {
-  const { overdue, followUpsDue } = useDeskCounts();
-  if (overdue + followUpsDue === 0) return null;
-  const figures = [
-    overdue > 0 && { key: "overdue", value: overdue, label: "overdue", color: RED },
-    followUpsDue > 0 && { key: "followups", value: followUpsDue, label: followUpsDue === 1 ? "follow-up due" : "follow-ups due", color: "#B7791F" },
-  ].filter(Boolean) as { key: string; value: number; label: string; color: string }[];
+  const { counts, loaded } = useDeskSummary();
+  if (!loaded) return null;
+  const figures = needsYou(counts);
+  const clear = figures.length === 0;
+  const colourOf = (tone: "red" | "amber") => (tone === "red" ? RED : AMBER_TEXT);
+  const edge = figures.some((f) => f.tone === "red") ? RED : clear ? GREEN : AMBER;
   return (
     <Card
-      component={Link} href="/tasks"
-      sx={{ display: "block", color: "inherit", textDecoration: "none", p: 1.75, borderRadius: "12px", border: "1px solid rgba(226,232,240,0.9)", boxShadow: "0 2px 10px rgba(15,23,42,0.05)", position: "relative", overflow: "hidden", transition: "box-shadow .2s, transform .2s", "&:hover": { boxShadow: "0 8px 22px rgba(15,23,42,0.1)", transform: "translateY(-2px)" }, "&::before": { content: '""', position: "absolute", left: 0, right: 0, top: 0, height: 3, bgcolor: overdue > 0 ? RED : AMBER } }}
+      sx={{ p: 1.75, borderRadius: "12px", border: "1px solid rgba(226,232,240,0.9)", boxShadow: "0 2px 10px rgba(15,23,42,0.05)", position: "relative", overflow: "hidden", "&::before": { content: '""', position: "absolute", left: 0, right: 0, top: 0, height: 3, bgcolor: edge } }}
     >
       <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", columnGap: 3, rowGap: 1 }}>
         <Typography sx={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "text.secondary" }}>Needs you today</Typography>
+        {clear && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: GREEN }}>
+            <CheckIcon sx={{ fontSize: 20 }} />
+            <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>Nothing due today</Typography>
+          </Box>
+        )}
         {figures.map((f) => (
-          <Box key={f.key} sx={{ display: "flex", alignItems: "baseline", gap: 0.75 }}>
-            <Typography component="span" sx={{ fontSize: "1.45rem", fontWeight: 700, lineHeight: 1.25, color: f.color, fontVariantNumeric: "tabular-nums" }}>{f.value}</Typography>
+          <Box
+            key={f.key} component={Link} href={deskHref(f.section)} aria-label={`${f.value} ${f.label}: open in the Desk`}
+            sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "inherit", textDecoration: "none", borderRadius: 1, px: 0.5, mx: -0.5, "&:hover": { bgcolor: "action.hover" } }}
+          >
+            <WarningIcon sx={{ fontSize: 22, color: colourOf(f.tone) }} />
+            <Typography component="span" sx={{ fontSize: "1.45rem", fontWeight: 700, lineHeight: 1.25, color: colourOf(f.tone), fontVariantNumeric: "tabular-nums" }}>{f.value}</Typography>
             <Typography component="span" variant="body2" color="text.secondary">{f.label}</Typography>
           </Box>
         ))}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, ml: { sm: "auto" }, color: "primary.main", fontSize: "0.8125rem", fontWeight: 600 }}>
+        <Box
+          component={Link} href={deskHref()}
+          sx={{ display: "flex", alignItems: "center", gap: 0.5, ml: { sm: "auto" }, color: "primary.main", textDecoration: "none", fontSize: "0.8125rem", fontWeight: 600, "&:hover": { textDecoration: "underline" } }}
+        >
           Open the Desk <ArrowForwardIcon sx={{ fontSize: 16 }} />
         </Box>
       </Box>
