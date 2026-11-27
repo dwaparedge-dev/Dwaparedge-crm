@@ -1,11 +1,14 @@
 import "server-only";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { getEnv } from "@/lib/env";
+import { sessionPoolerWarning } from "./pooler";
 
 const globalForPg = globalThis as unknown as { __pgPool?: Pool };
 
 function createPool(): Pool {
   const url = getEnv().DATABASE_URL;
+  const warning = sessionPoolerWarning(url);
+  if (warning) console.error(warning);
   const isLocal = url.includes("localhost") || url.includes("127.0.0.1");
   // Used only by the integration tests, which run inside a throwaway schema (see tests/integration/helpers.ts).
   const schema = process.env.DB_SEARCH_PATH;
@@ -16,6 +19,9 @@ function createPool(): Pool {
     connectionString: url,
     ssl: isLocal ? false : { rejectUnauthorized: false },
     max: getEnv().DB_POOL_MAX,
+    // Give an idle connection back to the pooler quickly, and fail a request fast instead of hanging when the pooler is full.
+    idleTimeoutMillis: 5_000,
+    connectionTimeoutMillis: 10_000,
     ...(schema ? { options: `-c search_path=${schema}` } : {}),
   });
   // An idle connection the database or pooler closes (restart, scale-down, an admin freeing connections) raises 'error' on the pool.
